@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+KITTY_BIN="${KITTY_BIN:-/Applications/kitty.app/Contents/MacOS/kitty}"
+
+usage() {
+  cat <<'EOF'
+usage:
+  kwindows list
+  kwindows send <uid> <text...>
+  kwindows send-enter <uid> <text...>
+
+uid format:
+  /tmp/kitty-main-12345::67
+
+examples:
+  kwindows list
+  kwindows send '/tmp/kitty-main-12345::67' 'clear'
+  kwindows send-enter '/tmp/kitty-main-12345::67' 'clear'
+EOF
+}
+
+list_sockets() {
+  local s found=0
+  shopt -s nullglob
+  for s in /tmp/kitty-main*; do
+    [ -S "$s" ] || continue
+    printf '%s\n' "$s"
+    found=1
+  done
+  shopt -u nullglob
+  (( found == 1 ))
+}
+
+list_windows() {
+  local sock json
+  local tmp
+  tmp="$(mktemp)"
+
+  {
+    printf 'UID\tSOCKET\tOS\tTAB\tWIN\tTAB_TITLE\tWIN_TITLE\tCWD\tFOCUSED\n'
+    if ! list_sockets >/dev/null 2>&1; then
+      :
+    else
+      while IFS= read -r sock; do
+        json="$("$KITTY_BIN" @ --to "unix:$sock" ls 2>/dev/null || true)"
+        [ -n "$json" ] || continue
+        printf '%s' "$json" | jq -r --arg socket "$sock" '
+          .[] as $os
+          | $os.tabs[] as $tab
+          | $tab.windows[]
+          | [
+              "\($socket)::\(.id)",
+              $socket,
+              ($os.id|tostring),
+              ($tab.id|tostring),
+              (.id|tostring),
+              ($tab.title // ""),
+              (.title // ""),
+              (.cwd // ""),
+              (if ($os.is_focused and $tab.is_focused and .is_focused) then "yes" else "no" end)
+            ]
+          | @tsv
+        '
+      done < <(list_sockets)
+    fi
+  } > "$tmp"
+
+  if [ "$(wc -l < "$tmp" | tr -d '[:space:]')" = "1" ]; then
+    rm -f "$tmp"
+    echo "No kitty windows found on /tmp/kitty-main* sockets."
+    return 0
+  fi
+
+  if command -v column >/dev/null 2>&1; then
+    column -t -s $'\t' "$tmp"
+  else
+    cat "$tmp"
+  fi
+  rm -f "$tmp"
+}
+
+parse_uid() {
+  local uid="$1"
+  if [[ "$uid" != *"::"* ]]; then
+    echo "invalid uid: $uid"
+    return 1
+  fi
+  SOCKET_PATH="${uid%%::*}"
+  WIN_ID="${uid##*::}"
+  if [[ ! "$WIN_ID" =~ ^[0-9]+$ ]]; then
+    echo "invalid uid window id: $uid"
+    return 1
+  fi
+  if [ ! -S "$SOCKET_PATH" ]; then
+    echo "socket not found: $SOCKET_PATH"
+    return 1
+  fi
+}
+
+send_to_window() {
+  local mode="$1"
+  local uid="$2"
+  shift 2
+  local msg="${*:-}"
+  local target=""
+
+  [ -n "$msg" ] || { echo "missing text"; return 1; }
+  parse_uid "$uid" || return 1
+  target="unix:$SOCKET_PATH"
+
+  if ! "$KITTY_BIN" @ --to "$target" ls >/dev/null 2>&1; then
+    echo "cannot connect to $target"
+    return 1
+  fi
+
+  if [ "$mode" = "send-enter" ]; then
+    msg="${msg}"$'\n'
+  fi
+
+  "$KITTY_BIN" @ --to "$target" send-text --match "id:$WIN_ID" -- "$msg"
+}
+
+main() {
+  local sub="${1:-list}"
+  case "$sub" in
+    list|ls)
+      list_windows
+      ;;
+    send|send-enter)
+      [ "$#" -ge 3 ] || { usage; exit 2; }
+      send_to_window "$1" "$2" "${@:3}"
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"

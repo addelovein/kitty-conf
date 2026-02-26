@@ -12,6 +12,7 @@ cmd_desc() {
     krc) echo "Run kitty @ against shared socket: krc <subcommand...>" ;;
     kctl) echo "Run kitty @ against current instance (fallback to krc)" ;;
     kensure) echo "Ensure live kitty remote-control socket target" ;;
+    kwindows) echo "List windows across instances + send by unique uid" ;;
     s) echo "Kitty SSH wrapper: s <host>" ;;
     qat) echo "Open/toggle quick access terminal" ;;
     nrun) echo "Run command and send desktop notify: nrun <command...>" ;;
@@ -26,7 +27,7 @@ print_header() {
 }
 
 print_commands() {
-  local known=(khelp kblue kgreen kprofiles krc kctl kensure s qat nrun)
+  local known=(khelp kblue kgreen kprofiles krc kctl kensure kwindows s qat nrun)
   local cmd extra
 
   printf 'Commands (%s)\n' "$BIN_DIR"
@@ -40,7 +41,7 @@ print_commands() {
   if [[ -d "$BIN_DIR" ]]; then
     while IFS= read -r extra; do
       case "$extra" in
-        khelp|kblue|kgreen|kprofiles|krc|kctl|kensure|s|qat|nrun) continue ;;
+        khelp|kblue|kgreen|kprofiles|krc|kctl|kensure|kwindows|s|qat|nrun) continue ;;
       esac
       printf '  %-10s %s\n' "$extra" "$(cmd_desc "$extra")"
     done < <(find "$BIN_DIR" -maxdepth 1 -type f -perm -u+x -print | xargs -n1 basename | sort)
@@ -74,6 +75,8 @@ Common examples
 -------------------------
   kblue 4 2
   kgreen 5 2
+  kwindows list
+  kwindows send-enter '/tmp/kitty-main-12345::67' 'clear'
   krc ls
   s my-server
   nrun long-command --flag

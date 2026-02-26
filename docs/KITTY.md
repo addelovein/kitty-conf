@@ -73,6 +73,7 @@
 - `khelp` (show all commands and hotkeys)
 - `kblue`, `kgreen`, `kprofiles`
 - `krc`, `kctl`, `kensure`
+- `kwindows` (list windows across instances + send by unique uid)
 - `s`, `qat`, `nrun`
 
 ## Keyboard Shortcuts
@@ -109,9 +110,13 @@
 - `kensure`: make sure kitty main socket exists (`/tmp/kitty-main`)
 - `krc <subcommand...>`: run `kitty @` against main socket
 - `kctl <subcommand...>`: run `kitty @` on current kitty instance (fallback to `krc`)
-- `kensure`: ensure a live kitty socket target
+- `kwindows list`: list all windows across `/tmp/kitty-main*` sockets with uid `socket::window_id`
+- `kwindows send <uid> <text...>`: send text to that exact window
+- `kwindows send-enter <uid> <text...>`: send text and press Enter
 - Example:
 - `krc ls`
+- `kwindows list`
+- `kwindows send-enter '/tmp/kitty-main-12345::67' 'clear'`
 - `krc send-text --match 'title:^row1-col1$' 'clear\n'`
 - `krc send-text --match 'var:row=top' 'clear\n'` (targets all top-row bash panes)
 
