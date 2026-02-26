@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+KITTEN_BIN="${KITTEN_BIN:-/Applications/kitty.app/Contents/MacOS/kitten}"
+exec "$KITTEN_BIN" ssh "$@"

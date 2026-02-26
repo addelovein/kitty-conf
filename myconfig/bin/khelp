@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_CONF="${KITTY_BASE_CONF:-$HOME/.config/myconfig/kitty/base.conf}"
+BIN_DIR="${MYCONFIG_BIN_DIR:-$HOME/.config/myconfig/bin}"
+
+cmd_desc() {
+  case "${1:-}" in
+    kblue) echo "Open Blue profile window: kblue [row1_cols 2-5] [row2_cols 1-2]" ;;
+    kgreen) echo "Open Green profile window: kgreen [row1_cols 2-5] [row2_cols 1-2]" ;;
+    kprofiles) echo "Print profile usage summary" ;;
+    krc) echo "Run kitty @ against shared socket: krc <subcommand...>" ;;
+    kctl) echo "Run kitty @ against current instance (fallback to krc)" ;;
+    kensure) echo "Ensure live kitty remote-control socket target" ;;
+    s) echo "Kitty SSH wrapper: s <host>" ;;
+    qat) echo "Open/toggle quick access terminal" ;;
+    nrun) echo "Run command and send desktop notify: nrun <command...>" ;;
+    khelp) echo "Show this help (commands + hotkeys)" ;;
+    *) echo "Custom command" ;;
+  esac
+}
+
+print_header() {
+  printf 'Kitty + Shell Quick Help\n'
+  printf '========================\n\n'
+}
+
+print_commands() {
+  local known=(khelp kblue kgreen kprofiles krc kctl kensure s qat nrun)
+  local cmd extra
+
+  printf 'Commands (%s)\n' "$BIN_DIR"
+  printf '%s\n' '-------------------------'
+  for cmd in "${known[@]}"; do
+    if [[ -x "$BIN_DIR/$cmd" ]]; then
+      printf '  %-10s %s\n' "$cmd" "$(cmd_desc "$cmd")"
+    fi
+  done
+
+  if [[ -d "$BIN_DIR" ]]; then
+    while IFS= read -r extra; do
+      case "$extra" in
+        khelp|kblue|kgreen|kprofiles|krc|kctl|kensure|s|qat|nrun) continue ;;
+      esac
+      printf '  %-10s %s\n' "$extra" "$(cmd_desc "$extra")"
+    done < <(find "$BIN_DIR" -maxdepth 1 -type f -perm -u+x -print | xargs -n1 basename | sort)
+  fi
+  printf '\n'
+}
+
+print_hotkeys() {
+  printf 'Hotkeys (%s)\n' "$BASE_CONF"
+  printf '%s\n' '-------------------------'
+  if [[ ! -f "$BASE_CONF" ]]; then
+    printf '  base config not found\n\n'
+    return
+  fi
+
+  awk '
+    $1 == "map" {
+      key = $2
+      $1 = ""
+      $2 = ""
+      sub(/^ +/, "", $0)
+      printf "  %-20s %s\n", key, $0
+    }
+  ' "$BASE_CONF"
+  printf '\n'
+}
+
+print_examples() {
+  cat <<'EOF'
+Common examples
+-------------------------
+  kblue 4 2
+  kgreen 5 2
+  krc ls
+  s my-server
+  nrun long-command --flag
+EOF
+}
+
+print_header
+print_commands
+print_hotkeys
+print_examples
