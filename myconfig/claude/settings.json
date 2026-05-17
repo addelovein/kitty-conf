@@ -1,0 +1,34 @@
+{
+  "env": {
+    "PATH": "/Users/addelovein/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(sed *)",
+      "Bash(awk *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(echo *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(wc *)",
+      "Bash(diff *)",
+      "Bash(tr *)",
+      "Bash(cut *)",
+      "Bash(xargs *)"
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash /Users/addelovein/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "swift-lsp@claude-plugins-official": true
+  },
+  "alwaysThinkingEnabled": false,
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "light-ansi"
+}

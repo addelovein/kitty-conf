@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pmset:*)",
+      "Bash(sort:*)",
+      "Bash(echo:*)",
+      "Bash(bash:*)",
+      "Bash(find ~/Library/Containers/com.docker.docker -name \"*.raw\" -o -name \"*.qcow2\" -o -name \"*.vmdk\" 2>/dev/null | xargs du -sh 2>/dev/null\nfind ~/Library/Group\\\\ Containers -name \"*.raw\" -o -name \"*.qcow2\" 2>/dev/null | xargs du -sh 2>/dev/null)",
+      "Bash(pgrep:*)",
+      "Bash(python3:*)",
+      "Bash(ssh:*)",
+      "Bash(scp /Users/addelovein/mem0appliance-install.sh admin@192.168.0.139:/tmp/mem0appliance-install.sh)",
+      "Skill(update-config)",
+      "Bash(curl:*)",
+      "Bash(brew list:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(claude mcp:*)",
+      "Bash(scp:*)",
+      "Bash(zsh *)",
+      "Bash(yabai *)",
+      "Bash(cp /Users/addelovein/.claude-work/commands/onboard-project.md /Users/addelovein/.claude-personal/commands/onboard-project.md)",
+      "Bash(cp /Users/addelovein/.claude-work/commands/sync-memory.md /Users/addelovein/.claude-personal/commands/sync-memory.md)",
+      "Bash(grep -v \"^Only in.*backups\\\\|^Only in.*file-history\\\\|^Only in.*paste-cache\\\\|^Only in.*session-env\\\\|^Only in.*sessions\\\\|^Only in.*shell-snapshots\\\\|^Only in.*tasks\\\\|^Only in.*projects.*\\\\.jsonl\\\\|^Only in.*projects.*-Users-addelovein-Source-MicroSynth\\\\|^Only in.*projects.*-Users-addelovein-Source-machine-dashboard\\\\|^Only in.*projects.*-Users-addelovein-Source-scraping-ornens\\\\|^Only in.*projects.*-Users-addelovein-Source-iteaP2B-Templates\\\\|^Only in.*projects.*-Users-addelovein-Source$\\\\|^Only in.*-Users-addelovein-Source-scraping/[0-9a-f]\")",
+      "Bash(chmod +x *)",
+      "Bash(pip show *)",
+      "Bash(/Users/addelovein/.venvs/superclaude/bin/superclaude --version)",
+      "Bash(/Users/addelovein/.venvs/superclaude/bin/superclaude --help)",
+      "Bash(ssh-add *)",
+      "Bash(ssh-copy-id *)",
+      "Bash(ssh-keyscan -H 192.168.0.225)",
+      "Bash(ssh-keygen -R 192.168.0.225)"
+    ]
+  }
+}
