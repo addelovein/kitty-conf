@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+KITTEN_BIN="${KITTEN_BIN:-/Applications/kitty.app/Contents/MacOS/kitten}"
+
+usage() {
+  cat <<'EOF'
+usage:
+  icat <image-path> [kitten-icat-options...]
+
+examples:
+  icat ~/.config/kitty/backgrounds/wolf-hacker-bg.jpg
+  icat --place 80x30@0x0 ~/anon-bg.jpg
+EOF
+}
+
+if [ "$#" -eq 0 ]; then
+  usage
+  exit 2
+fi
+
+if [ ! -x "$KITTEN_BIN" ]; then
+  if command -v kitten >/dev/null 2>&1; then
+    KITTEN_BIN="$(command -v kitten)"
+  else
+    echo "icat: kitten binary not found (checked $KITTEN_BIN and PATH)" >&2
+    exit 127
+  fi
+fi
+
+exec "$KITTEN_BIN" icat "$@"

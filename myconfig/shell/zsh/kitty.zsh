@@ -1,8 +1,23 @@
 # Kitty workflow helpers (SSH/notify/quick-access)
 export PATH="/Applications/kitty.app/Contents/MacOS:$PATH"
+
+# Auto-start claude-resume watcher once per Kitty instance
+if [ -n "${KITTY_WINDOW_ID:-}" ]; then
+  _resume_script="${HOME}/.config/kitty/scripts/claude-resume.sh"
+  _resume_pid="/tmp/claude-resume.pid"
+  if [ -x "$_resume_script" ]; then
+    if ! { [ -f "$_resume_pid" ] && kill -0 "$(cat "$_resume_pid")" 2>/dev/null; }; then
+      "$_resume_script" &>/dev/null &
+      disown
+    fi
+  fi
+  unset _resume_script _resume_pid
+fi
 export KITTY_BIN="/Applications/kitty.app/Contents/MacOS/kitty"
 export KITTEN_BIN="/Applications/kitty.app/Contents/MacOS/kitten"
 export KITTY_LISTEN_ON="unix:/tmp/kitty-main"
+# Keep terminal title ownership in our custom hook for stable branch titles.
+export DISABLE_AUTO_TITLE=true
 
 # Keep kitty window/tab titles synced to current directory in zsh tabs.
 autoload -Uz add-zsh-hook
@@ -98,7 +113,7 @@ kctl() {
 # Start a dedicated kitty OS window with a chosen profile/background.
 kitty_profile() {
   if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
-    echo "usage: kitty_profile <green|blue> [row1_cols(2-5)] [row2_cols(1-2)]"
+    echo "usage: kitty_profile <green|blue|red> [row1_cols(2-5)] [row2_cols(1-2)]"
     return 2
   fi
 
@@ -125,6 +140,7 @@ kitty_profile() {
   local i=""
   local title=""
   local role=""
+  local bash_bin="/opt/homebrew/bin/bash"
 
   if [[ ! "$top_cols" =~ ^[0-9]+$ ]] || (( top_cols < 2 || top_cols > 5 )); then
     echo "row1_cols must be an integer in range 2..5"
@@ -133,6 +149,13 @@ kitty_profile() {
   if [[ ! "$bottom_cols" =~ ^[0-9]+$ ]] || (( bottom_cols < 1 || bottom_cols > 2 )); then
     echo "row2_cols must be an integer in range 1..2"
     return 2
+  fi
+  if [ ! -x "$bash_bin" ]; then
+    bash_bin="$(command -v bash 2>/dev/null || true)"
+  fi
+  if [ -z "$bash_bin" ]; then
+    echo "bash not found on PATH"
+    return 1
   fi
 
   case "$profile" in
@@ -156,13 +179,23 @@ kitty_profile() {
       border_active="#62d6ff"
       border_inactive="#1f2a36"
       ;;
+    red)
+      tab_title="Red"
+      bg="$HOME/.config/kitty/backgrounds/red-hack-bg.jpg"
+      tab_active_bg="#7a1f2a"
+      tab_inactive_bg="#31161a"
+      tab_active_fg="#ffe8eb"
+      tab_inactive_fg="#dfb8be"
+      border_active="#ff6b86"
+      border_inactive="#3a1f24"
+      ;;
     *)
-      echo "invalid profile: $profile (use green or blue)"
+      echo "invalid profile: $profile (use green, blue, or red)"
       return 2
       ;;
   esac
 
-  main_win_id="$(kctl launch --type=os-window --tab-title "$tab_title" --title "row1-col1" --var row=top --var role=row1_col1 /opt/homebrew/bin/bash | tail -n1 | tr -d '[:space:]')"
+  main_win_id="$(kctl launch --type=os-window --tab-title "$tab_title" --title "row1-col1" --var row=top --var role=row1_col1 --var "profile=$profile" "$bash_bin" -i | tail -n1 | tr -d '[:space:]')"
   if [[ ! "$main_win_id" =~ ^[0-9]+$ ]]; then
     echo "failed to create kitty OS window for profile: $profile"
     return 1
@@ -184,11 +217,11 @@ kitty_profile() {
   fi
 
   # Approximate per-profile darkness by adjusting background color in this OS window.
-  if [ "$profile" = "green" ]; then
-    kctl set-colors --match "id:$main_win_id" background="#0a0d0a" >/dev/null 2>&1
-  else
-    kctl set-colors --match "id:$main_win_id" background="#000000" >/dev/null 2>&1
-  fi
+  case "$profile" in
+    green) kctl set-colors --match "id:$main_win_id" background="#0a0d0a" >/dev/null 2>&1 ;;
+    red) kctl set-colors --match "id:$main_win_id" background="#0d0808" >/dev/null 2>&1 ;;
+    *) kctl set-colors --match "id:$main_win_id" background="#000000" >/dev/null 2>&1 ;;
+  esac
 
   # Create row2-col1 by splitting row1-col1 into top/bottom bands.
   row2_first_id="$(kctl launch \
@@ -200,7 +233,8 @@ kitty_profile() {
     --title "row2-col1" \
     --var row=bottom \
     --var role=row2_col1 \
-    /opt/homebrew/bin/bash 2>/dev/null | tail -n1 | tr -d '[:space:]')"
+    --var "profile=$profile" \
+    "$bash_bin" -i 2>/dev/null | tail -n1 | tr -d '[:space:]')"
   if [ -z "$row2_first_id" ]; then
     echo "failed to create row2-col1"
     return 1
@@ -221,12 +255,13 @@ kitty_profile() {
       --title "__row1_rem__$i" \
       --var row=top \
       --var role=row1_rem \
-      /opt/homebrew/bin/bash 2>/dev/null | tail -n1 | tr -d '[:space:]')"
+      --var "profile=$profile" \
+      "$bash_bin" -i 2>/dev/null | tail -n1 | tr -d '[:space:]')"
     if [ -n "$new_id" ]; then
       title="${top_titles[$i]}"
       role="${title//-/_}"
       kctl set-window-title --match "id:$top_rem_id" "$title" >/dev/null 2>&1
-      kctl set-user-vars --match "id:$top_rem_id" "role=$role" "row=top" >/dev/null 2>&1
+      kctl set-user-vars --match "id:$top_rem_id" "role=$role" "row=top" "profile=$profile" >/dev/null 2>&1
       top_rem_id="$new_id"
     fi
   done
@@ -234,7 +269,7 @@ kitty_profile() {
     title="${top_titles[$top_cols]}"
     role="${title//-/_}"
     kctl set-window-title --match "id:$top_rem_id" "$title" >/dev/null 2>&1
-    kctl set-user-vars --match "id:$top_rem_id" "role=$role" "row=top" >/dev/null 2>&1
+    kctl set-user-vars --match "id:$top_rem_id" "role=$role" "row=top" "profile=$profile" >/dev/null 2>&1
   fi
 
   # Optional second bottom column split vertically in bottom band.
@@ -248,7 +283,8 @@ kitty_profile() {
       --title "row2-col2" \
       --var row=bottom \
       --var role=row2_col2 \
-      /opt/homebrew/bin/bash >/dev/null 2>&1
+      --var "profile=$profile" \
+      "$bash_bin" -i >/dev/null 2>&1
   fi
   if [ -n "$tab_id" ] && [ "$tab_id" != "null" ]; then
     kctl set-colors \
@@ -262,6 +298,7 @@ kitty_profile() {
 kprofiles() {
   echo "kgreen [row1_cols 2-5] [row2_cols 1-2]  -> anon-bg-faded-black.jpg (Green)"
   echo "kblue  [row1_cols 2-5] [row2_cols 1-2]  -> blue-hack-bg.jpg (Blue)"
+  echo "kred   [row1_cols 2-5] [row2_cols 1-2]  -> red-hack-bg.jpg (Red)"
 }
 
 # Run a command and send a desktop notification when done.

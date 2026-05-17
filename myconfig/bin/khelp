@@ -8,14 +8,18 @@ cmd_desc() {
   case "${1:-}" in
     kblue) echo "Open Blue profile window: kblue [row1_cols 2-5] [row2_cols 1-2]" ;;
     kgreen) echo "Open Green profile window: kgreen [row1_cols 2-5] [row2_cols 1-2]" ;;
+    kred) echo "Open Red profile window: kred [row1_cols 2-5] [row2_cols 1-2]" ;;
     kprofiles) echo "Print profile usage summary" ;;
     krc) echo "Run kitty @ against shared socket: krc <subcommand...>" ;;
     kctl) echo "Run kitty @ against current instance (fallback to krc)" ;;
     kensure) echo "Ensure live kitty remote-control socket target" ;;
     kwindows) echo "List windows across instances + send by unique uid" ;;
+    kcolors) echo "Show ANSI/truecolor palette samples in terminal" ;;
+    icat) echo "Show images in kitty terminal via kitten icat" ;;
     s) echo "Kitty SSH wrapper: s <host>" ;;
     qat) echo "Open/toggle quick access terminal" ;;
     nrun) echo "Run command and send desktop notify: nrun <command...>" ;;
+    kapprove) echo "Start/stop/status/toggle Claude Code auto-approver: kapprove [start|stop|status|toggle]" ;;
     khelp) echo "Show this help (commands + hotkeys)" ;;
     *) echo "Custom command" ;;
   esac
@@ -27,7 +31,7 @@ print_header() {
 }
 
 print_commands() {
-  local known=(khelp kblue kgreen kprofiles krc kctl kensure kwindows s qat nrun)
+  local known=(khelp kapprove kblue kgreen kred kprofiles krc kctl kensure kwindows kcolors icat s qat nrun)
   local cmd extra
 
   printf 'Commands (%s)\n' "$BIN_DIR"
@@ -41,7 +45,7 @@ print_commands() {
   if [[ -d "$BIN_DIR" ]]; then
     while IFS= read -r extra; do
       case "$extra" in
-        khelp|kblue|kgreen|kprofiles|krc|kctl|kensure|kwindows|s|qat|nrun) continue ;;
+        khelp|kblue|kgreen|kred|kprofiles|krc|kctl|kensure|kwindows|kcolors|icat|s|qat|nrun) continue ;;
       esac
       printf '  %-10s %s\n' "$extra" "$(cmd_desc "$extra")"
     done < <(find "$BIN_DIR" -maxdepth 1 -type f -perm -u+x -print | xargs -n1 basename | sort)
@@ -75,6 +79,9 @@ Common examples
 -------------------------
   kblue 4 2
   kgreen 5 2
+  kred 4 2
+  kcolors 256
+  icat ~/.config/kitty/backgrounds/wolf-hacker-bg.jpg
   kwindows list
   kwindows send-enter '/tmp/kitty-main-12345::67' 'clear'
   krc ls

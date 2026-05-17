@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+usage:
+  kcolors [all|16|256|rgb]
+
+examples:
+  kcolors
+  kcolors 16
+  kcolors 256
+  kcolors rgb
+EOF
+}
+
+print_16() {
+  local i
+  echo "ANSI 16 colors"
+  echo "--------------"
+  for i in $(seq 0 15); do
+    printf "\033[48;5;%sm %3s \033[0m " "$i" "$i"
+    if [ $(((i + 1) % 8)) -eq 0 ]; then
+      printf "\n"
+    fi
+  done
+  printf "\n\n"
+}
+
+print_256() {
+  local i
+  echo "ANSI 256 colors"
+  echo "---------------"
+  for i in $(seq 0 255); do
+    printf "\033[48;5;%sm %3s \033[0m " "$i" "$i"
+    if [ $(((i + 1) % 16)) -eq 0 ]; then
+      printf "\n"
+    fi
+  done
+  printf "\n\n"
+}
+
+print_rgb() {
+  local r g b
+  echo "Truecolor RGB samples"
+  echo "---------------------"
+  for r in 0 64 128 192 255; do
+    for g in 0 64 128 192 255; do
+      for b in 0 64 128 192 255; do
+        printf "\033[48;2;%s;%s;%sm  \033[0m" "$r" "$g" "$b"
+      done
+      printf " "
+    done
+    printf "\n"
+  done
+  printf "\n"
+}
+
+main() {
+  local mode="${1:-all}"
+  case "$mode" in
+    all)
+      print_16
+      print_256
+      print_rgb
+      ;;
+    16)
+      print_16
+      ;;
+    256)
+      print_256
+      ;;
+    rgb)
+      print_rgb
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+}
+
+main "${1:-all}"

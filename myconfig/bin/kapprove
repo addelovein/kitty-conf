@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT="${HOME}/.config/kitty/scripts/claude-approve.sh"
+PIDFILE="/tmp/claude-approve.pid"
+
+status() {
+  if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    printf 'claude-approve: active (pid %s)\n' "$(cat "$PIDFILE")"
+  else
+    printf 'claude-approve: inactive\n'
+  fi
+}
+
+start() {
+  if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    printf 'claude-approve: already active (pid %s)\n' "$(cat "$PIDFILE")"
+    exit 0
+  fi
+  "$SCRIPT" &
+  printf '%s' "$!" > "$PIDFILE"
+  printf 'claude-approve: started (pid %s)\n' "$!"
+}
+
+stop() {
+  if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    kill "$(cat "$PIDFILE")"
+    rm -f "$PIDFILE"
+    printf 'claude-approve: stopped\n'
+  else
+    printf 'claude-approve: not running\n'
+    rm -f "$PIDFILE"
+  fi
+}
+
+toggle() {
+  if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    stop
+  else
+    start
+  fi
+}
+
+case "${1:-status}" in
+  start)  start ;;
+  stop)   stop ;;
+  status) status ;;
+  toggle) toggle ;;
+  *)      printf 'usage: kapprove [start|stop|status|toggle]\n' >&2; exit 1 ;;
+esac
