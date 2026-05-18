@@ -102,17 +102,39 @@ bg_count=$(echo "$input" | jq -r '
   | if type == "number" then . else empty end
 ')
 
-# Git branch + dirty indicator (run from session cwd, cheap checks only)
+# Git branch + dirty indicator with a per-character truecolor gradient on icon+name.
 git_part=""
+render_gradient() {
+  # render_gradient <r1> <g1> <b1> <r2> <g2> <b2> <text>
+  # Emits each char of <text> in a truecolor interpolated from (r1,g1,b1) → (r2,g2,b2).
+  local r1=$1 g1=$2 b1=$3 r2=$4 g2=$5 b2=$6 text=$7
+  local n=${#text}
+  local i ch r g b
+  for (( i=0; i<n; i++ )); do
+    if (( n > 1 )); then
+      r=$(( r1 + (r2 - r1) * i / (n - 1) ))
+      g=$(( g1 + (g2 - g1) * i / (n - 1) ))
+      b=$(( b1 + (b2 - b1) * i / (n - 1) ))
+    else
+      r=$r1 g=$g1 b=$b1
+    fi
+    ch="${text:$i:1}"
+    printf "\033[38;2;%d;%d;%dm%s" "$r" "$g" "$b" "$ch"
+  done
+  printf "\033[0m"
+}
 if [ -n "$cwd" ]; then
   branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
   if [ -n "$branch" ]; then
     dirty=$(git -C "$cwd" status --porcelain 2>/dev/null | head -1)
-    if [ -n "$dirty" ]; then
-      git_part=$(printf "\033[33m %s*\033[0m" "$branch")
-    else
-      git_part="$(printf " %s" "$branch")"
-    fi
+    suffix=""
+    [ -n "$dirty" ] && suffix="*"
+    label=" ${branch}${suffix}"
+    case "$branch" in
+      main|master)         git_part=$(render_gradient  255  80  80   80   0   0 "$label") ;;
+      develop|development) git_part=$(render_gradient    80 255 120    0  60 200 "$label") ;;
+      *)                   git_part=$(render_gradient 255 230  80  140  80   0 "$label") ;;
+    esac
   fi
 fi
 
@@ -212,9 +234,16 @@ printf "%b" "$line"
 # ── row 2: kitty watchers ─────────────────────────────────────────────────────
 line2=""
 
-# full-auto indicator
+# full-auto indicator — render red when watcher is running AND this window is not paused.
+# "paused" = sticky banner latch from claude-approve.sh (shift-tab mode visible).
 if [ -f "/tmp/claude-approve.pid" ] && kill -0 "$(cat /tmp/claude-approve.pid)" 2>/dev/null; then
-  line2="$(printf "\033[33m\033[31m full-auto\033[0m")"
+  fa_state="active"
+  if [ -n "${KITTY_WINDOW_ID:-}" ] && [ -f "/tmp/claude-fullauto-status.${KITTY_WINDOW_ID}" ]; then
+    fa_state="$(cat "/tmp/claude-fullauto-status.${KITTY_WINDOW_ID}" 2>/dev/null)"
+  fi
+  if [ "$fa_state" != "paused" ]; then
+    line2="$(printf "\033[33m\033[31m full-auto\033[0m")"
+  fi
 fi
 
 # rate-limit / auto-resume indicator
