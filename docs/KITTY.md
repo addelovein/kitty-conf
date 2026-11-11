@@ -78,6 +78,7 @@
 
 ## Keyboard Shortcuts
 - `Cmd+Enter`: new window with current working directory
+- `Cmd+Shift+Enter`: split the current pane side by side (vertical split, current directory)
 - `Cmd+T`: profile-aware new tab
 - `Cmd+R`: start interactive pane resize mode (keyboard-driven)
 - Fast resize (no Alt):
