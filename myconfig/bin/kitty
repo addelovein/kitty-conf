@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# kitty launcher — always runs kitty.app in single-instance mode under the
+# "default" instance group, so subsequent `kload`s merge into this instance
+# rather than spawning sibling app processes.
+#
+# Pin THIS to the Dock (drag from Finder, or use a tiny .app shim) instead of
+# the raw kitty.app, or alias `kitty` to this path in your shell rc.
+
+exec open -na "/Applications/kitty.app" --args \
+  --single-instance --instance-group default "$@"

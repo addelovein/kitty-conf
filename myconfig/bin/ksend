@@ -1,0 +1,84 @@
+#!/bin/bash
+# kitty-send.sh — pick a kitty window by yabai space/position, send a message
+
+KITTY_SOCKET=$(ls /tmp/kitty-main-* 2>/dev/null | head -1)
+if [ -z "$KITTY_SOCKET" ]; then
+  echo "No kitty socket found" >&2
+  exit 1
+fi
+
+# Current focused window (the one we're running from — exclude from list)
+CURRENT_ID=$(yabai -m query --windows --window | jq -r '.id')
+
+TARGET_DIR="$HOME/.config/ksend_targets"
+mkdir -p "$TARGET_DIR"
+TARGET_FILE="$TARGET_DIR/$CURRENT_ID"
+
+# --target flag: force re-selection
+force_select=0
+args=()
+for arg in "$@"; do
+  if [ "$arg" = "--target" ]; then
+    force_select=1
+  else
+    args+=("$arg")
+  fi
+done
+set -- "${args[@]}"
+
+# Build list excluding the current window
+entries=$(yabai -m query --windows | jq -r '
+  .[] | select(.app == "kitty") |
+  "\(.space)\t\(.id)\t\(.title)"
+' | while IFS=$'\t' read -r space platform_id title; do
+  [ "$platform_id" = "$CURRENT_ID" ] && continue
+  space_name=$(yabai -m query --spaces --space "$space" | jq -r '.label')
+  printf "space:%-16s  %s\t%s\n" "$space_name" "$title" "$platform_id"
+done)
+
+if [ -z "$entries" ]; then
+  echo "No other kitty windows found" >&2
+  exit 1
+fi
+
+# Load saved target for this window unless forcing re-selection
+selected=""
+if [ $force_select -eq 0 ] && [ -f "$TARGET_FILE" ]; then
+  selected=$(cat "$TARGET_FILE")
+  # Validate saved target still exists in entries
+  saved_id=$(echo "$selected" | awk -F'\t' '{print $NF}' | head -1)
+  if ! echo "$entries" | awk -F'\t' '{print $NF}' | grep -qx "$saved_id"; then
+    selected=""
+  fi
+fi
+
+# Pick target(s) if no valid saved target
+if [ -z "$selected" ]; then
+  selected=$(echo "$entries" | fzf --prompt="Send to (Tab to multi-select): " \
+    --height=40% --border --multi --with-nth=1 --delimiter=$'\t')
+  [ -z "$selected" ] && exit 0
+  echo "$selected" > "$TARGET_FILE"
+fi
+
+# Use inline message if provided as arguments, otherwise prompt
+if [ $# -gt 0 ]; then
+  message="$*"
+else
+  printf "Message: "
+  read -r message
+  [ -z "$message" ] && exit 0
+fi
+
+kitty_ls=$(kitty @ --to unix:"$KITTY_SOCKET" ls)
+
+while IFS= read -r line; do
+  platform_id=$(echo "$line" | awk -F'\t' '{print $NF}')
+  kitty_id=$(echo "$kitty_ls" | jq -r \
+    ".[] | select(.platform_window_id == $platform_id) | .tabs[].windows[].id")
+  if [ -z "$kitty_id" ]; then
+    echo "Could not resolve kitty window id for platform id $platform_id" >&2
+    continue
+  fi
+  kitty @ --to unix:"$KITTY_SOCKET" send-text --match id:"$kitty_id" "${message}"$'\n'
+  echo "Sent to kitty window $kitty_id (yabai id $platform_id)"
+done <<< "$selected"

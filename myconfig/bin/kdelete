@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# kdelete NAME [NAME...] — delete saved kitty layout(s) from ~/.config/kitty/sessions/
+#
+#   kdelete red                  # delete ~/.config/kitty/sessions/red.conf
+#   kdelete red test old-thing   # delete several at once
+#   kdelete --list               # list saved sessions (same output as kload --list)
+#
+# Refuses to touch files that don't start with the `# kitty session saved by
+# ksave` marker (hand-authored sessions). Override with --force.
+
+set -euo pipefail
+
+SESS_DIR="$HOME/.config/kitty/sessions"
+FORCE=0
+
+# Parse flags first; non-flag args are session names.
+names=()
+for arg in "$@"; do
+  case "$arg" in
+    --list|-l)
+      ls -1 "$SESS_DIR"/*.conf 2>/dev/null | sed 's#.*/##; s#\.conf$##' \
+        || echo "(no saved sessions)"
+      exit 0
+      ;;
+    --force|-f) FORCE=1 ;;
+    -h|--help)
+      sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    -*)
+      echo "kdelete: unknown flag '$arg'" >&2
+      exit 2
+      ;;
+    *)  names+=("$arg") ;;
+  esac
+done
+
+if [[ ${#names[@]} -eq 0 ]]; then
+  echo "kdelete: need at least one session name" >&2
+  echo "usage: kdelete NAME [NAME...]   |   kdelete --list" >&2
+  exit 2
+fi
+
+status=0
+for name in "${names[@]}"; do
+  file="$SESS_DIR/$name.conf"
+  if [[ ! -f "$file" ]]; then
+    echo "kdelete: no session '$name' ($file)" >&2
+    status=1
+    continue
+  fi
+  # Refuse to delete hand-authored sessions unless --force.
+  if (( ! FORCE )) && ! head -1 "$file" | grep -q "saved by ksave"; then
+    echo "kdelete: $file looks hand-authored (not a ksave file). Refusing." >&2
+    echo "         Re-run with --force to delete anyway." >&2
+    status=1
+    continue
+  fi
+  rm -- "$file"
+  echo "kdelete: removed $file"
+done
+exit "$status"

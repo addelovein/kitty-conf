@@ -110,6 +110,120 @@ kctl() {
   fi
 }
 
+# Set the current kitty tab's title. Usage: ktabname <title...>   (no title: back to automatic)
+# Targets the tab holding this window, so it still hits the right tab via the shared socket.
+ktabname() {
+  if [ -n "${KITTY_WINDOW_ID:-}" ]; then
+    kctl set-tab-title --match "window_id:$KITTY_WINDOW_ID" "$*"
+  else
+    kctl set-tab-title "$*"
+  fi
+}
+alias ktab='ktabname'
+
+# Set the current kitty window's (pane's) title. Usage: kwindowname <title...>
+# The title sticks (shell title hooks can't override it); no title: back to automatic.
+kwindowname() {
+  local -a match=()
+  [ -n "${KITTY_WINDOW_ID:-}" ] && match=(--match "id:$KITTY_WINDOW_ID")
+  if [ "$#" -eq 0 ]; then
+    kctl set-window-title "${match[@]}"
+  else
+    kctl set-window-title "${match[@]}" "$*"
+  fi
+}
+alias kwin='kwindowname'
+
+# Resolve the color palette for a profile into the caller's named variables.
+# Sets: bg tab_active_bg tab_inactive_bg tab_active_fg tab_inactive_fg
+#       border_active border_inactive win_bg tab_title
+_kitty_profile_palette() {
+  local profile="$1"
+  case "$profile" in
+    green)
+      tab_title="Green"
+      bg="$HOME/.config/kitty/backgrounds/anon-bg-faded-black.jpg"
+      tab_active_bg="#1e6b46"; tab_inactive_bg="#163726"
+      tab_active_fg="#dfffe9"; tab_inactive_fg="#a9d6b8"
+      border_active="#56c98a"; border_inactive="#224734"
+      win_bg="#0a0d0a"
+      ;;
+    blue)
+      tab_title="Blue"
+      bg="$HOME/.config/kitty/backgrounds/blue-hack-bg.jpg"
+      tab_active_bg="#1d4f8a"; tab_inactive_bg="#15283d"
+      tab_active_fg="#e3f0ff"; tab_inactive_fg="#a8bfd9"
+      border_active="#62d6ff"; border_inactive="#1f2a36"
+      win_bg="#000000"
+      ;;
+    red)
+      tab_title="Red"
+      bg="$HOME/.config/kitty/backgrounds/red-hack-bg.jpg"
+      tab_active_bg="#7a1f2a"; tab_inactive_bg="#31161a"
+      tab_active_fg="#ffe8eb"; tab_inactive_fg="#dfb8be"
+      border_active="#ff6b86"; border_inactive="#3a1f24"
+      win_bg="#0d0808"
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+  return 0
+}
+
+# Recolor the CURRENT tab/window in place (no new OS window).
+# Usage: kset <green|blue|red>   (alias kitty_recolor)
+kitty_recolor() {
+  if [ "$#" -ne 1 ]; then
+    echo "usage: kset <green|blue|red>"
+    return 2
+  fi
+
+  local profile="$1"
+  local tab_title bg
+  local tab_active_bg tab_inactive_bg tab_active_fg tab_inactive_fg
+  local border_active border_inactive win_bg
+
+  if ! _kitty_profile_palette "$profile"; then
+    echo "invalid profile: $profile (use green, blue, or red)"
+    return 2
+  fi
+
+  # Resolve the tab holding this shell's window; fall back to the focused tab
+  # (focus is unreliable when called from a child process like Claude Code).
+  local tab_id=""
+  if [[ "${KITTY_WINDOW_ID:-}" =~ ^[0-9]+$ ]]; then
+    tab_id="$(kctl ls 2>/dev/null | jq -r --argjson wid "$KITTY_WINDOW_ID" '.[] | .tabs[] | select([.windows[].id] | index($wid)) | .id' | head -n1)"
+  fi
+  if [ -z "$tab_id" ] || [ "$tab_id" = "null" ]; then
+    tab_id="$(kctl ls 2>/dev/null | jq -r '.[] | .tabs[] | select(.is_focused == true) | .id' | head -n1)"
+  fi
+  if [ -z "$tab_id" ] || [ "$tab_id" = "null" ]; then
+    echo "could not resolve focused tab (is remote control reaching this window?)"
+    return 1
+  fi
+
+  kctl set-tab-title --match "id:$tab_id" "$tab_title" >/dev/null 2>&1
+  kctl set-tab-color --match "id:$tab_id" \
+    "active_bg=$tab_active_bg" \
+    "active_fg=$tab_active_fg" \
+    "inactive_bg=$tab_inactive_bg" \
+    "inactive_fg=$tab_inactive_fg" >/dev/null 2>&1
+  kctl set-colors --match-tab "id:$tab_id" \
+    "active_border_color=$border_active" \
+    "inactive_border_color=$border_inactive" >/dev/null 2>&1
+  # Per-window settings (background color + profile var) apply to each pane.
+  local wid
+  for wid in $(kctl ls 2>/dev/null | jq -r --argjson tid "$tab_id" '.[] | .tabs[] | select(.id == $tid) | .windows[].id'); do
+    kctl set-colors --match "id:$wid" "background=$win_bg" >/dev/null 2>&1
+    kctl set-user-vars --match "id:$wid" "profile=$profile" >/dev/null 2>&1
+  done
+  # Background image is per OS window (painted once behind all splits); --match
+  # only selects which OS window. Never use --configured: it replaces the global
+  # default image, which every OS window without its own image follows.
+  kctl set-background-image --match "id:$wid" --layout scaled "$bg" >/dev/null 2>&1
+}
+
 # Start a dedicated kitty OS window with a chosen profile/background.
 kitty_profile() {
   if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
@@ -294,6 +408,11 @@ kitty_profile() {
   fi
   kctl set-background-image --match "id:$main_win_id" --layout scaled "$bg" >/dev/null 2>&1
 }
+
+alias kset='kitty_recolor'
+alias kgreen='kitty_profile green'
+alias kblue='kitty_profile blue'
+alias kred='kitty_profile red'
 
 kprofiles() {
   echo "kgreen [row1_cols 2-5] [row2_cols 1-2]  -> anon-bg-faded-black.jpg (Green)"

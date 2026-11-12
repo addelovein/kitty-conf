@@ -6,6 +6,7 @@ KITTY_BIN="/Applications/kitty.app/Contents/MacOS/kitty"
 POLL_INTERVAL=5
 PIDFILE="/tmp/claude-resume.pid"
 LIMIT_FILE="/tmp/claude-limit.txt"  # format: "reset_epoch|time_str"
+STATE_FILE="/tmp/claude-resume-state"  # one "wid=1" line per armed window
 
 pick_socket() {
   local s
@@ -23,13 +24,16 @@ resolve_target() {
   pick_socket || return 1
 }
 
-TARGET="$(resolve_target || true)"
-[ -n "$TARGET" ] || { print "claude-resume: no kitty socket found" >&2; exit 1; }
-
 printf '%s' "$$" > "$PIDFILE"
-trap 'rm -f "$PIDFILE" "$LIMIT_FILE"' EXIT
+# Keep LIMIT_FILE and STATE_FILE across restarts — they're the only way a fresh
+# watcher can know a reset is pending. Only PIDFILE is process-scoped.
+trap 'rm -f "$PIDFILE"' EXIT
 
-krc() { "$KITTY_BIN" @ --to "$TARGET" "$@"; }
+krc() {
+  local t
+  t="$(resolve_target)" || return 1
+  "$KITTY_BIN" @ --to "$t" "$@"
+}
 
 parse_reset_time() {
   local raw="$1"
@@ -47,11 +51,27 @@ parse_reset_time() {
 typeset -A limit_sent
 typeset -A resumed
 
+# Restore `resumed` flags from disk so a restarted watcher can still fire
+# the resume keystroke for a window that was armed by a previous process.
+if [ -f "$STATE_FILE" ]; then
+  while IFS='=' read -r k v; do
+    [ -n "$k" ] && resumed[$k]="$v"
+  done < "$STATE_FILE"
+fi
+
+persist_state() {
+  : > "$STATE_FILE.tmp"
+  for k in "${(@k)resumed}"; do
+    [[ "${resumed[$k]}" == "1" ]] && printf '%s=1\n' "$k" >> "$STATE_FILE.tmp"
+  done
+  mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+}
+
 while true; do
   window_ids=("${(@f)$(krc ls 2>/dev/null | jq -r '.[] | .tabs[] | .windows[] | .id' 2>/dev/null)}")
 
   for wid in "${window_ids[@]}"; do
-    [[ -z "$wid" || -z "${wid//[0-9]/}" ]] || continue
+    [[ -z "$wid" || -n "${wid//[0-9]/}" ]] && continue
     screen="$(krc get-text --match "id:$wid" --extent screen 2>/dev/null)" || continue
 
     # Interactive rate-limit prompt → pick "Stop and wait"
@@ -69,6 +89,7 @@ while true; do
         parsed="$(parse_reset_time "$reset_line" 2>/dev/null || true)"
         [ -n "$parsed" ] && printf '%s' "$parsed" > "$LIMIT_FILE"
         resumed[$wid]=1
+        persist_state
       fi
 
     else
@@ -78,25 +99,27 @@ while true; do
           reset_epoch="$(cut -d'|' -f1 "$LIMIT_FILE")"
           now="$(date +%s)"
           if [ "$now" -ge "$reset_epoch" ]; then
-            krc send-text --match "id:$wid" "please resume where we left off\r" 2>/dev/null
-            rm -f "$LIMIT_FILE"
-            limit_sent[$wid]=0
-            resumed[$wid]=0
+            if krc send-text --match "id:$wid" "please resume where we left off\r" 2>/dev/null; then
+              limit_sent[$wid]=0
+              resumed[$wid]=0
+              persist_state
+              # Only clear the limit file once every armed window has been resumed.
+              any_armed=0
+              for k in "${(@k)resumed}"; do
+                [[ "${resumed[$k]}" == "1" ]] && any_armed=1 && break
+              done
+              [ "$any_armed" = "0" ] && rm -f "$LIMIT_FILE"
+            fi
           fi
         else
           # Limit file gone (cleared externally), reset state
           limit_sent[$wid]=0
           resumed[$wid]=0
+          persist_state
         fi
       fi
     fi
   done
-
-  # Clean up stale limit file
-  if [ -f "$LIMIT_FILE" ]; then
-    reset_epoch="$(cut -d'|' -f1 "$LIMIT_FILE")"
-    [ "$(date +%s)" -ge "$reset_epoch" ] && rm -f "$LIMIT_FILE"
-  fi
 
   sleep "$POLL_INTERVAL"
 done

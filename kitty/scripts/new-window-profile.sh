@@ -43,7 +43,7 @@ if [ -z "$focused_profile" ] || [ "$focused_profile" = "null" ]; then
 fi
 
 if [ "$focused_profile" = "gray" ] || [ -z "$focused_profile" ]; then
-  krc launch --type=window --cwd=current --var profile=gray >/dev/null 2>&1
+  krc launch --type=window --location=hsplit --cwd=current --var profile=gray >/dev/null 2>&1
   exit 0
 fi
 
@@ -52,4 +52,4 @@ if [ ! -x "$BASH_BIN" ]; then
 fi
 [ -n "$BASH_BIN" ] || exit 1
 
-krc launch --type=window --cwd=current --var "profile=$focused_profile" "$BASH_BIN" -i >/dev/null 2>&1
+krc launch --type=window --location=hsplit --cwd=current --var "profile=$focused_profile" "$BASH_BIN" -i >/dev/null 2>&1

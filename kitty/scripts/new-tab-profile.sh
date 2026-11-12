@@ -35,6 +35,7 @@ json="$(krc ls 2>/dev/null)" || exit 1
 focused_title="$(printf '%s' "$json" | jq -r '[.[] | .tabs[] | select(.is_focused == true)] | .[0].title // ""')"
 focused_window_title="$(printf '%s' "$json" | jq -r '[.[] | .tabs[] | select(.is_focused == true) | .windows[] | select(.is_focused == true)] | .[0].title // ""')"
 focused_cwd="$(printf '%s' "$json" | jq -r '[.[] | .tabs[] | select(.is_focused == true) | .windows[] | select(.is_focused == true)] | .[0].cwd // ""')"
+focused_profile="$(printf '%s' "$json" | jq -r '[.[] | .tabs[] | select(.is_focused == true) | .windows[] | select(.is_focused == true)] | .[0].user_vars.profile // ""')"
 [ -z "$focused_window_title" ] && focused_window_title="shell"
 
 path_title_from_cwd() {
@@ -81,11 +82,12 @@ create_colored_tab() {
   local inactive_fg="$5"
   local border_active="$6"
   local border_inactive="$7"
+  local profile_name="$8"
   local win_id=""
   local tab_id=""
 
   # Do not pin tab-title; let Kitty derive tab title from active window title.
-  win_id="$(krc launch --type=tab --title "$win_title" "$BASH_BIN" 2>/dev/null | tail -n1 | tr -d '[:space:]')"
+  win_id="$(krc launch --type=tab --title "$win_title" --var "profile=$profile_name" "$BASH_BIN" -i 2>/dev/null | tail -n1 | tr -d '[:space:]')"
   [[ "$win_id" =~ ^[0-9]+$ ]] || return 1
 
   tab_id="$(krc ls 2>/dev/null | jq -r --argjson wid "$win_id" '.[] | .tabs[] | select([.windows[].id] | index($wid)) | .id' | head -n1)"
@@ -104,13 +106,33 @@ create_colored_tab() {
 
 case "$focused_title" in
   Blue)
-    create_colored_tab "$tab_title_to_use" "#1d4f8a" "#e3f0ff" "#15283d" "#a8bfd9" "#62d6ff" "#1f2a36"
-    ;;
+    create_colored_tab "$tab_title_to_use" "#1d4f8a" "#e3f0ff" "#15283d" "#a8bfd9" "#62d6ff" "#1f2a36" "blue"
+  ;;
   Green)
-    create_colored_tab "$tab_title_to_use" "#1e6b46" "#dfffe9" "#163726" "#a9d6b8" "#56c98a" "#224734"
-    ;;
+    create_colored_tab "$tab_title_to_use" "#1e6b46" "#dfffe9" "#163726" "#a9d6b8" "#56c98a" "#224734" "green"
+  ;;
+  Red)
+    create_colored_tab "$tab_title_to_use" "#7a1f2a" "#ffe8eb" "#31161a" "#dfb8be" "#ff6b86" "#3a1f24" "red"
+  ;;
   *)
-    # Gray/default tabs keep regular shell behavior; set initial window title only.
-    krc launch --type=tab --title "$tab_title_to_use" >/dev/null 2>&1
+    case "$focused_profile" in
+      blue)
+        create_colored_tab "$tab_title_to_use" "#1d4f8a" "#e3f0ff" "#15283d" "#a8bfd9" "#62d6ff" "#1f2a36" "blue"
+        ;;
+      green)
+        create_colored_tab "$tab_title_to_use" "#1e6b46" "#dfffe9" "#163726" "#a9d6b8" "#56c98a" "#224734" "green"
+        ;;
+      red)
+        create_colored_tab "$tab_title_to_use" "#7a1f2a" "#ffe8eb" "#31161a" "#dfb8be" "#ff6b86" "#3a1f24" "red"
+        ;;
+      gray|"")
+        # Gray/default tabs keep regular shell behavior; set initial window title only.
+        krc launch --type=tab --title "$tab_title_to_use" --var profile=gray >/dev/null 2>&1
+        ;;
+      *)
+        # Any explicitly non-gray profile uses bash.
+        krc launch --type=tab --title "$tab_title_to_use" --var "profile=$focused_profile" "$BASH_BIN" -i >/dev/null 2>&1
+        ;;
+    esac
     ;;
 esac

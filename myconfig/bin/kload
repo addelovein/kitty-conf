@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# kload [name] — restore a kitty layout saved by `ksave`.
+#
+# Inside an existing kitty window: opens the session as a NEW TAB in this
+# kitty instance using remote control — no new app process. Outside kitty
+# (e.g. invoked from iTerm or a Terminal.app shell): spawns one new kitty
+# with --session.
+#
+#   kload            # restore ~/.config/kitty/sessions/default.conf
+#   kload red        # restore ~/.config/kitty/sessions/red.conf
+#   kload --list     # list saved sessions
+
+set -euo pipefail
+
+KITTY="${KITTY_BIN:-/Applications/kitty.app/Contents/MacOS/kitty}"
+SESS_DIR="$HOME/.config/kitty/sessions"
+
+if [[ "${1:-}" == "--list" || "${1:-}" == "-l" ]]; then
+  ls -1 "$SESS_DIR"/*.conf 2>/dev/null | sed 's#.*/##; s#\.conf$##' || echo "(no saved sessions)"
+  exit 0
+fi
+
+NAME="${1:-default}"
+SESS="$SESS_DIR/$NAME.conf"
+[[ -f "$SESS" ]] || { echo "kload: no session '$NAME' ($SESS)" >&2; echo "saved:" >&2; "$0" --list >&2; exit 1; }
+[[ -x "$KITTY" ]] || { echo "kload: kitty not found at $KITTY" >&2; exit 1; }
+
+# If we're not inside a kitty window with remote control, fall back to spawning
+# a fresh kitty. open -na detaches cleanly; --single-instance lets a subsequent
+# kload from inside that kitty merge into it (when this script is the only
+# launcher in use).
+if [[ -z "${KITTY_LISTEN_ON:-}" ]]; then
+  echo "kload: no KITTY_LISTEN_ON — launching new kitty with session '$NAME'"
+  exec open -na "/Applications/kitty.app" --args \
+    --single-instance --instance-group default --session "$SESS"
+fi
+
+KAT=("$KITTY" @)
+echo "kload: restoring '$NAME' into current kitty as new tab"
+
+# Replay the session file as kitten @ calls. We parse the limited grammar that
+# ksave produces: new_tab, layout, launch, focus_matching_window. The first
+# `launch` after `new_tab` becomes the initial window of the new tab; subsequent
+# `launch` lines split off it.
+TAB_CREATED=0
+PENDING_LAYOUT=""
+TAB_TITLE=""
+
+# Strip comments + blank lines, keep order.
+while IFS= read -r line; do
+  # trim
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
+  [[ -z "$line" || "$line" == \#* ]] && continue
+
+  case "$line" in
+    new_tab*)
+      TAB_TITLE="${line#new_tab}"
+      TAB_TITLE="${TAB_TITLE#"${TAB_TITLE%%[![:space:]]*}"}"
+      ;;
+    layout*)
+      PENDING_LAYOUT="${line#layout}"
+      PENDING_LAYOUT="${PENDING_LAYOUT#"${PENDING_LAYOUT%%[![:space:]]*}"}"
+      ;;
+    launch*)
+      # Strip leading "launch " — the rest are flags + command, all valid for
+      # `kitten @ launch`. The session file uses shell-style quoting, so we
+      # tokenize via `eval set --` (controlled by us; input is user-owned).
+      ARGS="${line#launch}"
+      ARGS="${ARGS#"${ARGS%%[![:space:]]*}"}"
+      eval "set -- $ARGS"
+      if (( TAB_CREATED == 0 )); then
+        # Tab title = basename of the main window's --cwd (the project folder
+        # where you start claude). Falls back to `new_tab` argument if --cwd
+        # isn't set on the first launch.
+        FIRST_CWD=""
+        for arg in "$@"; do
+          case "$arg" in --cwd=*) FIRST_CWD="${arg#--cwd=}"; break;; esac
+        done
+        if [[ -z "$FIRST_CWD" ]]; then
+          # Handle the `--cwd VALUE` (two-token) form.
+          prev=""
+          for arg in "$@"; do
+            if [[ "$prev" == "--cwd" ]]; then FIRST_CWD="$arg"; break; fi
+            prev="$arg"
+          done
+        fi
+        EFFECTIVE_TITLE="${FIRST_CWD##*/}"
+        [[ -z "$EFFECTIVE_TITLE" ]] && EFFECTIVE_TITLE="$TAB_TITLE"
+        EXTRA=(--type=tab)
+        [[ -n "$EFFECTIVE_TITLE" ]] && EXTRA+=(--tab-title "$EFFECTIVE_TITLE")
+        "${KAT[@]}" launch "${EXTRA[@]}" "$@" >/dev/null
+        TAB_CREATED=1
+        if [[ -n "$PENDING_LAYOUT" ]]; then
+          "${KAT[@]}" goto-layout --match recent:0 "$PENDING_LAYOUT" >/dev/null || true
+          PENDING_LAYOUT=""
+        fi
+      else
+        # Subsequent launches must target the tab we just created, not whatever
+        # tab is focused. recent:0 = most recently created tab.
+        "${KAT[@]}" launch --match recent:0 "$@" >/dev/null
+      fi
+      ;;
+    focus_matching_window*)
+      MATCH="${line#focus_matching_window}"
+      MATCH="${MATCH#"${MATCH%%[![:space:]]*}"}"
+      # Constrain to the tab we created; otherwise we may focus a same-named
+      # window in a different tab.
+      "${KAT[@]}" focus-window --no-response --match "$MATCH" 2>/dev/null || true
+      ;;
+    *)
+      echo "kload: skipping unrecognized directive: $line" >&2
+      ;;
+  esac
+done <"$SESS"
+
+(( TAB_CREATED == 1 )) || { echo "kload: session '$NAME' had no launch directives — nothing to do" >&2; exit 1; }

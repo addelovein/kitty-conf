@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+# ksave [name] [--force] — save the focused kitty tab's exact layout, panes,
+# cwds, and running commands to a restorable kitty session file. Restore with:
+#   kload <name>      # opens in a fresh OS-window via kitty --session
+#
+# v2 rewrite (2026-05-28):
+#   * Full nested split-tree preservation via tab.layout_state.pairs (no longer
+#     flat-tiles nested layouts).
+#   * Per-pane command recovery:
+#       - claude  -> claude-work | claude-personal (detected from the running
+#                    process's CLAUDE_CONFIG_DIR via `ps -wwwE`), keeping any
+#                    initial prompt argv.
+#       - ssh / kitten ssh  -> emitted as `kitten ssh <target>`.
+#       - script-like fg procs -> emitted verbatim.
+#       - transient wrappers (caffeinate / sleep / bare shells) -> dropped.
+#   * Each launch runs `bash -lic 'cd <cwd> 2>/dev/null; <cmd>; exec bash -li'`
+#     so PATH and aliases are loaded and the cwd is enforced (kitty's --cwd is
+#     unreliable for split panes that inherit the parent's directory).
+#
+# Sessions live in ~/.config/kitty/sessions/<name>.conf (plain kitty session
+# syntax). Hand-authored files are never silently overwritten; use --force.
+
+set -euo pipefail
+
+NAME="${1:-default}"
+FORCE=0
+[[ "${2:-}" == "--force" ]] && FORCE=1
+
+KITTY="${KITTY_BIN:-/Applications/kitty.app/Contents/MacOS/kitty}"
+SESS_DIR="$HOME/.config/kitty/sessions"
+OUT="$SESS_DIR/$NAME.conf"
+
+command -v python3 >/dev/null || { echo "ksave: python3 required" >&2; exit 1; }
+[[ -x "$KITTY" ]] || { echo "ksave: kitty not found at $KITTY" >&2; exit 1; }
+mkdir -p "$SESS_DIR"
+
+TO=()
+[[ -n "${KITTY_LISTEN_ON:-}" ]] && TO=(--to "$KITTY_LISTEN_ON")
+
+PYGEN="$(mktemp -t ksave-gen.XXXXXX.py)"
+trap 'rm -f "$PYGEN" "$OUT.tmp" 2>/dev/null' EXIT
+cat > "$PYGEN" <<'PYEOF'
+import sys, os, json, shlex, subprocess
+
+BASH = "/opt/homebrew/bin/bash"
+
+data = json.load(sys.stdin)
+osw = next((w for w in data if w.get("is_focused")), data[0])
+tab = next((t for t in osw.get("tabs", []) if t.get("is_focused")),
+           next((t for t in osw.get("tabs", []) if t.get("is_active")), osw["tabs"][0]))
+
+# --- Map layout_state's window-group ids to real window ids ------------------
+ls = tab.get("layout_state") or {}
+pairs = ls.get("pairs")
+groups = (ls.get("all_windows") or {}).get("window_groups") or []
+gid2wid = {}
+for g in groups:
+    wids = g.get("window_ids") or []
+    if wids:
+        gid2wid[g["id"]] = wids[0]
+
+wins_by_id = {w["id"]: w for w in tab.get("windows", [])}
+focused_id = next((w["id"] for w in tab["windows"] if w.get("is_focused")),
+                  next(iter(wins_by_id)))
+
+# --- Per-process environment via `ps -wwwE` ----------------------------------
+def proc_env(pid):
+    try:
+        out = subprocess.check_output(["ps", "-wwwE", "-p", str(pid)],
+                                      stderr=subprocess.DEVNULL, text=True)
+    except Exception:
+        return {}
+    # First line is header; second is `args + env`. Env entries are KEY=VAL
+    # separated by spaces, and the command argv is at the start. We can't split
+    # cleanly, but env vars look like /^[A-Z_][A-Z0-9_]*=/, which is enough.
+    env = {}
+    for tok in out.replace("\n", " ").split(" "):
+        if "=" in tok:
+            k, v = tok.split("=", 1)
+            if k and k[0].isalpha() and k.replace("_", "").isalnum() and k.isupper():
+                env[k] = v
+    return env
+
+# --- Recover a re-runnable command from a window -----------------------------
+def recover_cmd(w):
+    procs = w.get("foreground_processes") or []
+    if not procs:
+        return None
+
+    # 1) claude: pick the process whose argv[0] basename is 'claude'.
+    for p in procs:
+        argv = p.get("cmdline") or []
+        if argv and os.path.basename(argv[0]).lower() == "claude":
+            env = proc_env(p.get("pid"))
+            cfg = env.get("CLAUDE_CONFIG_DIR", "")
+            if cfg.endswith(".claude-work"):
+                variant = "claude-work"
+            elif cfg.endswith(".claude-personal"):
+                variant = "claude-personal"
+            else:
+                variant = "claude"  # fallback; user can fix
+            # Preserve initial prompt args, if any. Args may contain real
+            # newlines (e.g. claude's /sc:load prompt); build them at runtime
+            # via printf so the saved file stays single-line shlex-parseable.
+            extra = argv[1:]
+            if not extra:
+                return variant
+            quoted = []
+            for a in extra:
+                if "\n" in a:
+                    parts = a.split("\n")
+                    fmt = "\\n".join(["%s"] * len(parts))
+                    args_str = " ".join(shlex.quote(p) for p in parts)
+                    quoted.append(f'"$(printf {shlex.quote(fmt)} {args_str})"')
+                else:
+                    quoted.append(shlex.quote(a))
+            return variant + " " + " ".join(quoted)
+
+    # 2) ssh / kitten ssh: find the real ssh process and recover the target.
+    for p in procs:
+        argv = p.get("cmdline") or []
+        if not argv:
+            continue
+        exe = os.path.basename(argv[0])
+        if exe == "ssh" or argv[0].endswith("/ssh"):
+            tgt = None
+            if "--" in argv:
+                # ssh-kitten bootstrap: target follows the lone --
+                i = argv.index("--")
+                if i + 1 < len(argv):
+                    tgt = argv[i + 1]
+            if not tgt:
+                for a in argv[1:]:
+                    if not a.startswith("-"):
+                        tgt = a
+                        break
+            if tgt:
+                return f"kitten ssh {tgt}"
+            return " ".join(shlex.quote(a) for a in argv)
+
+    # 3) Script-like leading process (./scripts/foo.sh, bash scripts/foo.sh).
+    leaf = procs[-1]
+    argv = leaf.get("cmdline") or []
+    if argv:
+        exe = os.path.basename(argv[0])
+        first = argv[0]
+        # bash scripts/foo.sh <args>...
+        if exe in ("bash", "sh", "zsh") and len(argv) > 1 and \
+           (argv[1].endswith(".sh") or argv[1].startswith("scripts/") or argv[1].startswith("./")):
+            script = argv[1]
+            if not script.startswith(("/", "./")):
+                script = "./" + script
+            rest = " ".join(shlex.quote(a) for a in argv[2:])
+            return (script + (" " + rest if rest else "")).strip()
+        # direct script call: /path/to/foo.sh, scripts/foo.sh, ./scripts/foo.sh
+        if first.endswith(".sh") or "/scripts/" in first or first.startswith(("./", "scripts/")):
+            script = first
+            if not script.startswith(("/", "./")):
+                script = "./" + script
+            rest = " ".join(shlex.quote(a) for a in argv[1:])
+            return (script + (" " + rest if rest else "")).strip()
+        # 4) Fall through: drop transient wrappers; emit verbatim otherwise.
+        if exe in ("caffeinate", "sleep", "bash", "zsh", "sh", "fish",
+                   "-bash", "-zsh", "-sh", "-fish"):
+            return None
+        return " ".join(shlex.quote(a) for a in argv)
+
+    return None
+
+# --- Per-pane meta -----------------------------------------------------------
+def meta(wid):
+    w = wins_by_id[wid]
+    cwd = w.get("cwd") or os.path.expanduser("~")
+    title = (w.get("title") or "").strip() or f"win{wid}"
+    cmd = recover_cmd(w)
+    return cwd, title, cmd
+
+def emit_launch(wid, location=None, bias=None):
+    """Build a single 'launch ...' line."""
+    cwd, title, cmd = meta(wid)
+    parts = ["launch"]
+    if location is not None:
+        parts.append(f"--location={location}")
+    if bias is not None:
+        parts.append(f"--bias={bias}")
+    parts += ["--cwd", cwd, "--title", shlex.quote(title)]
+    inner = f"cd {shlex.quote(cwd)} 2>/dev/null; "
+    if cmd:
+        inner += cmd + "; "
+    inner += f"exec {BASH} -li"
+    parts += [BASH, "-lic", shlex.quote(inner)]
+    return " ".join(parts)
+
+# --- Plan the build order from layout_state.pairs ----------------------------
+# kitty's split semantics:
+#   * `launch --location=hsplit` -> new window placed BELOW the active one.
+#   * `launch --location=vsplit` -> new window placed RIGHT  of the active one.
+#   * `--bias=N` -> N% of the parent's space goes to the NEW window.
+#
+# Each pair node in layout_state is {one, two, horizontal, bias}:
+#     horizontal=True  -> children stacked LEFT(one) | RIGHT(two) -> vsplit
+#     horizontal=False -> children stacked TOP(one)  / BOTTOM(two) -> hsplit
+# The bias is the fraction the FIRST child ("one") occupies.
+#
+# Build strategy: pre-order DFS that splits OFF the secondary subtree as a
+# SINGLE pane while the boundary is still a single window, then subdivides
+# both halves. This is the only order that preserves nested geometry, because
+# kitty's launch --location splits the active WINDOW's slot, not its enclosing
+# group — so a right-column has to be split off BEFORE the left side gets
+# subdivided into multiple panes, etc.
+#
+# Algorithm:
+#   emit_node(node):
+#     if leaf: launch wid; return wid
+#     # 1. Realise `one` as a single window covering its slot.
+#     one_seed = first_leaf(one)
+#     launch(one_seed) if root, else it's already launched as part of caller
+#     # 2. Split `two`'s seed off it (one pane covering two's whole slot).
+#     focus(one_seed)
+#     two_seed = first_leaf(two)
+#     launch(two_seed, location, bias)
+#     # 3. Now subdivide each half in place. The seed already occupies the
+#     #    slot we want to subdivide; recurse with that seed pre-emitted.
+#     subdivide(one, one_seed)
+#     subdivide(two, two_seed)
+#
+# `first_leaf(node)` picks the depth-first "one"-chain leaf so subdivisions
+# only ever split secondary leaves off the already-placed seed.
+
+emitted = []  # list of launch lines, in order
+
+def first_leaf(node):
+    while not isinstance(node, int):
+        node = node["one"]
+    return gid2wid[node]
+
+def subdivide(node, seed_wid):
+    """Subdivide an already-realised slot. seed_wid is the single window
+    currently occupying this node's bounding box (which equals first_leaf(node))."""
+    if isinstance(node, int):
+        # Leaf reached: no further splits, seed already placed.
+        return
+    # Direction + bias for splitting `two` off the seed.
+    loc = "vsplit" if node.get("horizontal", True) else "hsplit"
+    one_share = node.get("bias")
+    bias = 50 if one_share is None else max(5, min(95, round((1.0 - float(one_share)) * 100)))
+    # Focus the seed (which is first_leaf(node['one']) == first_leaf(node)).
+    emitted.append(f"focus_matching_window id:{seed_wid}")
+    # Split `two`'s seed off it.
+    two_seed = first_leaf(node["two"])
+    emitted.append(emit_launch(two_seed, loc, bias))
+    # Recurse into both halves.
+    subdivide(node["one"], seed_wid)     # seed_wid is still first_leaf(one)
+    subdivide(node["two"], two_seed)
+
+def emit_node(node):
+    """Top-level entry: realise the root anchor, then subdivide."""
+    root_seed = first_leaf(node)
+    emitted.append(emit_launch(root_seed))   # initial pane (no location/bias)
+    if not isinstance(node, int):
+        subdivide(node, root_seed)
+    return root_seed
+
+# --- Build the file ----------------------------------------------------------
+tab_title = tab.get("title") or NAME
+header = [
+    f"# kitty session saved by ksave — restore with: kload {os.environ['NAME']}",
+    f"# Captured from focused tab {tab_title!r}; layout {tab.get('layout','splits')}.",
+    f"new_tab {tab_title}",
+    f"layout {tab.get('layout','splits')}",
+    "",
+]
+
+if pairs is not None and groups:
+    emit_node(pairs)
+else:
+    # Fallback: no split tree (single window or unknown layout) — flat tile.
+    for w in tab.get("windows", []):
+        emitted.append(emit_launch(w["id"]))
+
+# Land focus on the originally-focused pane.
+emitted.append(f'focus_matching_window id:{focused_id}')
+
+# Map id-based focus to title-based, because window ids change across runs.
+# Replace `focus_matching_window id:N` with title:<title> match using the title
+# we emitted earlier for that wid.
+def title_re(t):
+    # Escape only true regex metacharacters. kitty's search parser is strict
+    # about over-escaping (e.g. `\-` confuses it), and these chars are NOT
+    # metacharacters: - _ / : ~ @ # space digits letters.
+    return "^" + "".join("\\" + c if c in r".()[]{}+*?|^$\\" else c for c in t) + "$"
+
+id_to_title = {wid: meta(wid)[1] for wid in wins_by_id}
+final = []
+for ln in emitted:
+    if ln.startswith("focus_matching_window id:"):
+        wid = int(ln.split(":", 1)[1].split()[0])
+        t = id_to_title.get(wid, "")
+        # Emit bare `title:<regex>` — kitty's session parser passes the rest
+        # of the line to the matcher as-is; surrounding quotes leak through.
+        final.append("focus_matching_window title:" + title_re(t))
+    else:
+        final.append(ln)
+
+sys.stdout.write("\n".join(header + final) + "\n")
+PYEOF
+
+"$KITTY" @ "${TO[@]}" ls | NAME="$NAME" python3 "$PYGEN" > "$OUT.tmp"
+
+# Don't silently clobber a hand-authored session.
+if [[ -f "$OUT" ]] && ! head -1 "$OUT" | grep -q "saved by ksave"; then
+  if [[ "$FORCE" -ne 1 ]]; then
+    rm -f "$OUT.tmp"
+    echo "ksave: $OUT looks hand-authored (not a ksave file). Refusing to overwrite." >&2
+    echo "       Re-run as: ksave $NAME --force   to overwrite anyway." >&2
+    exit 3
+  fi
+fi
+mv "$OUT.tmp" "$OUT"
+
+echo "ksave: wrote $OUT ($(grep -c '^launch' "$OUT") panes)"
