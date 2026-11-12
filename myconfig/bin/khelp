@@ -16,11 +16,23 @@ cmd_desc() {
     kwindows) echo "List windows across instances + send by unique uid" ;;
     kcolors) echo "Show ANSI/truecolor palette samples in terminal" ;;
     icat) echo "Show images in kitty terminal via kitten icat" ;;
+    kshow) echo "Show images in a side window next to this one (works from Claude Code): kshow img... | kshow --close" ;;
+    ktemp) echo "Run in the Claude column's TEMP shell: ktemp <cmd> | ktemp --split [--title T] <cmd>" ;;
+    kfloat) echo "Show images or image URLs in a floating centered panel: kfloat <file|url>..." ;;
+    kdoctor) echo "Check the AddeKitty + Claude Code setup (read-only)" ;;
+    kdelete) echo "Delete saved layout(s): kdelete <name...> | kdelete --list" ;;
+    kset) echo "Recolor the current tab to a profile: kset <green|blue|red>" ;;
+    ksend) echo "Pick a kitty window by yabai space/position and send it a message (needs yabai)" ;;
+    kitty) echo "Single-instance kitty launcher (pin this instead of kitty.app)" ;;
     s) echo "Kitty SSH wrapper: s <host>" ;;
     qat) echo "Open/toggle quick access terminal" ;;
     nrun) echo "Run command and send desktop notify: nrun <command...>" ;;
     kapprove) echo "Start/stop/status/toggle Claude Code auto-approver: kapprove [start|stop|status|toggle]" ;;
     khelp) echo "Show this help (commands + hotkeys)" ;;
+    ksave) echo "Save current kitty tab layout: ksave [name]" ;;
+    kload) echo "Restore a saved layout: kload [name|--list]" ;;
+    ktabname) echo "Rename the current tab: ktabname <title...> (no title: automatic)" ;;
+    kwindowname) echo "Rename the current window/pane: kwindowname <title...> (no title: automatic)" ;;
     *) echo "Custom command" ;;
   esac
 }
@@ -31,7 +43,7 @@ print_header() {
 }
 
 print_commands() {
-  local known=(khelp kapprove kblue kgreen kred kprofiles krc kctl kensure kwindows kcolors icat s qat nrun)
+  local known=(khelp kdoctor kfloat kapprove kblue kgreen kred kprofiles krc kctl kensure kwindows kcolors icat kshow ktemp ksave kload kdelete ktabname kwindowname kset ksend s qat nrun)
   local cmd extra
 
   printf 'Commands (%s)\n' "$BIN_DIR"
@@ -44,9 +56,7 @@ print_commands() {
 
   if [[ -d "$BIN_DIR" ]]; then
     while IFS= read -r extra; do
-      case "$extra" in
-        khelp|kblue|kgreen|kred|kprofiles|krc|kctl|kensure|kwindows|kcolors|icat|s|qat|nrun) continue ;;
-      esac
+      [[ " ${known[*]} " == *" $extra "* ]] && continue
       printf '  %-10s %s\n' "$extra" "$(cmd_desc "$extra")"
     done < <(find "$BIN_DIR" -maxdepth 1 -type f -perm -u+x -print | xargs -n1 basename | sort)
   fi

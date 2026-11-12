@@ -1,6 +1,10 @@
-# KITTY Setup Notes
+# kitty setup reference
 
-## What You Have
+Reference for the installed setup (paths assume `setup.sh` defaults). Install
+steps: [`README.md`](../README.md). Claude Code integration:
+[`CLAUDE-KITTY.md`](CLAUDE-KITTY.md). Layout save/restore: [`KSAVE.md`](KSAVE.md).
+
+## Overview
 - OS: macOS
 - Main style: dark hacker theme with tinted background image
 - Main font: `Fira Code`
@@ -10,9 +14,11 @@
 - default/gray tabs: light gray
 - `Green` profile tabs: green
 - `Blue` profile tabs: blue
+- `Red` profile tabs: red
 - Main layouts:
 - `Green`: 2-row `splits` template, background `anon-bg-faded-black.jpg`, green tab color
 - `Blue`: 2-row `splits` template, background `blue-hack-bg.jpg`, blue tab color
+- `Red`: 2-row `splits` template, background `red-hack-bg.jpg`, red tab color
 - Row model (only):
 - `Row1`: `col1`, `col2`, optional `col3`, optional `col4`, optional `col5` (bash)
 - `Row2`: `col1`, optional `col2` (bash)
@@ -28,11 +34,14 @@
 - `kgreen`
 - Start Blue profile:
 - `kblue`
+- Start Red profile:
+- `kred`
 - Show available profile commands:
 - `kprofiles`
 - Optional counts:
 - `kgreen <row1_cols 2-5> <row2_cols 1-2>`
 - `kblue <row1_cols 2-5> <row2_cols 1-2>`
+- `kred <row1_cols 2-5> <row2_cols 1-2>`
 - Example:
 - `kblue 3 1` (Row1: 3 columns, Row2: 1 column)
 - `kblue 4 2` (Row1 small + 4 equalized top columns, Row2 large + 2 equal bottom columns)
@@ -43,41 +52,48 @@
 - `kitty.conf` now uses:
 - `startup_session none`
 - Meaning: opening Kitty normally starts a regular window/shell.
-- Use `kgreen` or `kblue` when you want the full 6-pane profile window.
+- Use `kgreen`, `kblue`, or `kred` when you want the full 6-pane profile window.
 
 ## Key Paths
-- Main config: `/Users/addelovein/.config/kitty/kitty.conf`
-- Main config backend: `/Users/addelovein/.config/myconfig/kitty/base.conf`
-- Theme: `/Users/addelovein/.config/kitty/theme-hacker.conf`
-- Quick access config: `/Users/addelovein/.config/kitty/quick-access-terminal.conf`
-- SSH kitten config: `/Users/addelovein/.config/kitty/ssh.conf`
-- New tab script: `/Users/addelovein/.config/kitty/scripts/new-tab-profile.sh`
+- Main config: `~/.config/kitty/kitty.conf`
+- Main config backend: `~/.config/myconfig/kitty/base.conf`
+- Theme: `~/.config/kitty/theme-hacker.conf`
+- Quick access config: `~/.config/kitty/quick-access-terminal.conf`
+- SSH kitten config: `~/.config/kitty/ssh.conf`
+- New tab script: `~/.config/kitty/scripts/new-tab-profile.sh`
+- New window script: `~/.config/kitty/scripts/new-window-profile.sh`
 - Sessions:
-- `/Users/addelovein/.config/kitty/sessions/green-five.kitty-session`
-- `/Users/addelovein/.config/kitty/sessions/blue-five.kitty-session`
-- Background folder: `/Users/addelovein/.config/kitty/backgrounds`
-- Zsh loader: `/Users/addelovein/.zshrc`
-- Zsh kitty logic: `/Users/addelovein/.config/myconfig/shell/zsh/kitty.zsh`
-- Bash loader: `/Users/addelovein/.bashrc`
-- Bash kitty helper: `/Users/addelovein/.config/myconfig/shell/bash/kitty.bash`
+- `~/.config/kitty/sessions/green-five.kitty-session`
+- `~/.config/kitty/sessions/blue-five.kitty-session`
+- Background folder: `~/.config/kitty/backgrounds`
+- Zsh loader: `~/.zshrc`
+- Zsh kitty logic: `~/.config/myconfig/shell/zsh/kitty.zsh`
+- Bash loader: `~/.bashrc`
+- Bash kitty helper: `~/.config/myconfig/shell/bash/kitty.bash`
 
 ## Config Layout
-- Kitty reads: `/Users/addelovein/.config/kitty/kitty.conf`
-- That file includes: `/Users/addelovein/.config/myconfig/kitty/base.conf`
-- Zsh reads: `/Users/addelovein/.zshrc` then sources `/Users/addelovein/.config/myconfig/shell/zsh/kitty.zsh`
-- Bash reads: `/Users/addelovein/.bashrc` then sources `/Users/addelovein/.config/myconfig/shell/bash/kitty.bash`
-- Command shortcuts live in: `/Users/addelovein/.config/myconfig/bin`
+- Kitty reads: `~/.config/kitty/kitty.conf`
+- That file includes: `~/.config/myconfig/kitty/base.conf`
+- Zsh reads: `~/.zshrc` then sources `~/.config/myconfig/shell/zsh/kitty.zsh`
+- Bash reads: `~/.bashrc` then sources `~/.config/myconfig/shell/bash/kitty.bash`
+- Command shortcuts live in: `~/.config/myconfig/bin`
 - Both zsh/bash add that directory to `PATH`
 
 ## Bin Commands
 - `khelp` (show all commands and hotkeys)
-- `kblue`, `kgreen`, `kprofiles`
+- `kblue`, `kgreen`, `kred`, `kprofiles`
 - `krc`, `kctl`, `kensure`
 - `kwindows` (list windows across instances + send by unique uid)
+- `kcolors` (print 16/256/RGB terminal color samples)
+- `icat` (show images inline in Kitty via kitten icat)
+- `kshow` (images in a split; works from Claude Code), `ktemp` (run in the Claude column's TEMP shell), `kfloat` (images or image URLs in a floating panel)
+- `ksave`, `kload`, `kdelete` (save/restore tab layouts, see [`KSAVE.md`](KSAVE.md))
+- `ktabname`, `kwindowname`, `kset` (names, recolor a tab to a profile)
+- `kdoctor` (check the setup), `kapprove` (Claude auto-approver), `ksend` (needs yabai)
 - `s`, `qat`, `nrun`
 
 ## Keyboard Shortcuts
-- `Cmd+Enter`: new window with current working directory
+- `Cmd+Enter`: new split window in current directory (profile-aware shell)
 - `Cmd+Shift+Enter`: split the current pane side by side (vertical split, current directory)
 - `Cmd+T`: profile-aware new tab
 - `Cmd+R`: start interactive pane resize mode (keyboard-driven)
@@ -86,20 +102,24 @@
 - `Cmd+Ctrl+Right`: narrower
 - `Cmd+Ctrl+Up`: taller
 - `Cmd+Ctrl+Down`: shorter
-- `Cmd+Ctrl+0`: reset pane sizes
+- `Ctrl+Shift+0`: reset pane sizes
 - New tab title: starts from active window title
 - Tab title then updates dynamically with the active window title (for `cd`, it follows folder path)
 - If current folder is in a git repo, title becomes `folder   branch`
 - If active title is a structural pane label (`row1-colX` / `row2-colX`), title uses current folder path instead
 - In `Blue` tab: opens Bash tab with blue tab color
 - In `Green` tab: opens Bash tab with green tab color
+- In `Red` tab: opens Bash tab with red tab color
+- In non-gray/profile tabs: new tabs default to Bash
 - In gray/default tabs: normal Kitty shell behavior
 - `Cmd+Shift+R`: reload kitty config
 - `Cmd+,`: edit kitty config
 - `Cmd+Ctrl+F`: fullscreen toggle
 - `Ctrl+Shift+Z`: active-window zoom toggle (full-size `stack` and restore)
 - `Cmd+Shift+J`: quick-access terminal (quake style)
-- `Cmd+Shift+O`: create a tab-wide right column (~25%) in `splits` layout
+- `Cmd+Shift+O`: create a tab-wide right column (~25%) in `splits` layout, by hand.
+  Claude sessions get their own STATUS + TEMP column automatically
+  ([`CLAUDE-KITTY.md`](CLAUDE-KITTY.md) §1b); use this one outside Claude.
 
 ## Shell Helpers
 - `s <host>`: kitty SSH kitten wrapper
@@ -107,6 +127,7 @@
 - `nrun <command>`: run command + notify on finish
 - `kgreen`: open Green 6-pane profile
 - `kblue`: open Blue 6-pane profile
+- `kred`: open Red 6-pane profile
 - `kprofiles`: print profile quick reference
 - `kensure`: make sure kitty main socket exists (`/tmp/kitty-main`)
 - `krc <subcommand...>`: run `kitty @` against main socket
@@ -114,21 +135,27 @@
 - `kwindows list`: list all windows across `/tmp/kitty-main*` sockets with uid `socket::window_id`
 - `kwindows send <uid> <text...>`: send text to that exact window
 - `kwindows send-enter <uid> <text...>`: send text and press Enter
+- `kcolors [all|16|256|rgb]`: preview terminal color palette
+- `icat <image-path> [icat-options...]`: display image inline in terminal
 - Example:
 - `krc ls`
+- `kcolors 256`
+- `icat ~/.config/kitty/backgrounds/wolf-hacker-bg.jpg`
 - `kwindows list`
 - `kwindows send-enter '/tmp/kitty-main-12345::67' 'clear'`
 - `krc send-text --match 'title:^row1-col1$' 'clear\n'`
 - `krc send-text --match 'var:row=top' 'clear\n'` (targets all top-row bash panes)
 
 ## Shell Defaults
-- In Blue/Green profile layouts, all row panes default to Bash (`/opt/homebrew/bin/bash`).
+- In Blue/Green/Red profile layouts, all row panes default to Bash (`/opt/homebrew/bin/bash`).
 - Gray/default (non-profile) windows keep normal shell defaults.
+- Non-gray/profile tabs created via `Cmd+T` default to Bash.
+- Non-gray/profile splits created via `Cmd+Enter` default to Bash.
 
 ## Bash Prompt
-- File: `/Users/addelovein/.bashrc`
-- Login loader: `/Users/addelovein/.bash_profile`
-- Kitty helper file: `/Users/addelovein/.config/myconfig/shell/bash/kitty.bash`
+- File: `~/.bashrc`
+- Login loader: `~/.bash_profile`
+- Kitty helper file: `~/.config/myconfig/shell/bash/kitty.bash`
 - Style: two-line modern prompt with:
 - `user@host`
 - current path
@@ -136,12 +163,13 @@
 - command status (`ok` or `x<code>`)
 - Also updates kitty window title to current path (`~`-shortened), so tab names track folder changes
 - In git repos, bash title adds the current branch after the path
+- Enables colored `ls` in bash (`ls`, `l`, `la`, `ll`)
 - Reload in current bash shell:
 - `source ~/.bashrc`
 
 ## Zsh Title Sync
-- Loader file: `/Users/addelovein/.zshrc`
-- Logic file: `/Users/addelovein/.config/myconfig/shell/zsh/kitty.zsh`
+- Loader file: `~/.zshrc`
+- Logic file: `~/.config/myconfig/shell/zsh/kitty.zsh`
 - Adds `precmd` + `chpwd` hooks to set kitty window title to `%~`
 - In git repos, zsh title adds the current branch after the path
 - This keeps tab names in sync with active zsh window path as you move folders
@@ -163,7 +191,7 @@
 - `krc ls | jq -r '.[] as $os | $os.tabs[] as $tab | $tab.windows[] | "os=\($os.id) tab=\($tab.id) win=\(.id) title=\(.title)"'`
 
 ## Visual Settings (Current Defaults)
-- `background_image /Users/addelovein/.config/kitty/backgrounds/wolf-hacker-bg.jpg`
+- `background_image ~/.config/kitty/backgrounds/wolf-hacker-bg.jpg`
 - `background_tint 0.88`
 - `background_tint_gaps 0.0`
 - `window_padding_width 2`
@@ -175,7 +203,7 @@
 - Reload zsh helpers: `source ~/.zshrc`
 
 ## tmux Quickstart (Remote Reattach)
-- Config file: `/Users/addelovein/.tmux.conf`
+- Config file: `~/.tmux.conf`
 - Start a named session on the machine where job will run:
 - `tmux new -s work`
 - Run your long job inside tmux:

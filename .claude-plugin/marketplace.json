@@ -1,0 +1,12 @@
+{
+  "name": "addekitty",
+  "description": "AddeKitty: kitty terminal integration for Claude Code",
+  "owner": { "name": "AddeKitty" },
+  "plugins": [
+    {
+      "name": "addekitty",
+      "source": "./claude/kitty-plugin",
+      "description": "Right-hand STATUS + TEMP column per kitty tab, a live window per subagent, and kshow/ktemp for images and live output"
+    }
+  ]
+}

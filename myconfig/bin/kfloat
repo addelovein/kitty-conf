@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# kfloat — show images in a floating kitty panel centered on the screen.
+#
+#   kfloat [options] <file|url>...
+#
+#   --timeout S   seconds per image before it moves on / closes (default
+#                 KFLOAT_TIMEOUT or 12; 0 = wait for a key)
+#   --focus       take keyboard focus (used when you click a link)
+#   --nofocus     never take focus; click the panel to focus it (default)
+#
+# Any key shows the next image; after the last one the panel closes. q or Esc
+# closes at once. Size: KFLOAT_COLS (default 100) x KFLOAT_LINES (default 32).
+#
+# http(s) URLs are downloaded first (https-only redirects, max 10 MB, 15 s) to
+# ~/Library/Caches/kfloat and shown only if the content really is an image.
+set -u
+
+KITTEN="/Applications/kitty.app/Contents/MacOS/kitten"
+[ -x "$KITTEN" ] || KITTEN="$(command -v kitten)" || { echo "kfloat: kitten not found" >&2; exit 1; }
+
+# ---- viewer mode: runs inside the panel ------------------------------------
+if [ "${1:-}" = "--view" ]; then
+  shift; timeout="$1"; shift
+  n=$#; i=0
+  printf '\033]0;Image preview\007\033[?25l'
+  for f in "$@"; do
+    i=$((i + 1))
+    cols=$(tput cols 2>/dev/null || echo 100); rows=$(tput lines 2>/dev/null || echo 32)
+    printf '\033[2J\033[3J\033[H'
+    "$KITTEN" icat --stdin=no --clear >/dev/null 2>&1
+    "$KITTEN" icat --stdin=no --place "${cols}x$((rows - 1))@0x0" --scale-up "$f" 2>/dev/null \
+      || printf '(cannot show %s)' "$f"
+    label="${f##*/}"; [ -n "${KFLOAT_LABELS:-}" ] && label="$(sed -n "${i}p" <<<"$KFLOAT_LABELS")"
+    more=""; [ "$i" -lt "$n" ] && more=" · key: next"
+    printf '\033[%d;1H\033[2m%s (%d/%d)%s · q: close\033[0m' "$rows" "${label:0:$((cols - 30))}" "$i" "$n" "$more"
+    if [ "$timeout" -gt 0 ]; then read -rsn1 -t "$timeout" key; else read -rsn1 key; fi
+    case "${key:-}" in q|Q|$'\e') break ;; esac
+    key=""
+  done
+  exit 0
+fi
+
+# ---- launcher mode ---------------------------------------------------------
+timeout="${KFLOAT_TIMEOUT:-12}"
+focus="on-demand"
+files=()
+labels=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --timeout) timeout="$2"; shift 2; continue ;;
+    --focus) focus="exclusive"; shift; continue ;;
+    --nofocus) focus="on-demand"; shift; continue ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  esac
+  src="$1"; shift
+  case "$src" in
+    http://*|https://*)
+      cache="${XDG_CACHE_HOME:-$HOME/Library/Caches}/kfloat"
+      mkdir -p "$cache"; find "$cache" -type f -mtime +7 -delete 2>/dev/null
+      base="$(printf '%s' "$src" | md5 -q)"
+      f="$(ls "$cache/$base".* 2>/dev/null | head -1)"
+      if [ -z "$f" ]; then
+        tmp="$cache/.$base.$$"
+        if ! curl -fsSL --proto '=http,https' --proto-redir '=https' --max-redirs 3 \
+               --max-filesize 10485760 --max-time 15 -A 'kfloat' -o "$tmp" -- "$src"; then
+          echo "kfloat: download failed: $src" >&2; rm -f "$tmp"; continue
+        fi
+        mime="$(file -b --mime-type "$tmp")"
+        case "$mime" in
+          image/png|image/jpeg|image/gif|image/webp|image/bmp|image/tiff) ;;
+          *) echo "kfloat: not an image ($mime): $src" >&2; rm -f "$tmp"; continue ;;
+        esac
+        f="$cache/$base.${mime#image/}"
+        mv "$tmp" "$f"
+      fi
+      label="$src" ;;
+    file://*) f="${src#file://}"; label="$f" ;;
+    *) f="$src"; label="$src" ;;
+  esac
+  case "$f" in /*) ;; *) f="$PWD/$f" ;; esac
+  [ -f "$f" ] || { echo "kfloat: no such file: $f" >&2; continue; }
+  files+=("$f")
+  labels="$labels${labels:+$'\n'}${label}"
+done
+[ "${#files[@]}" -gt 0 ] || exit 1
+
+# Not --detach: in kitty 0.50 it drops --lines/--columns ("Unknown flag").
+KFLOAT_LABELS="$labels" nohup "$KITTEN" panel \
+  --edge=center-sized --layer=overlay --focus-policy="$focus" \
+  --columns="${KFLOAT_COLS:-100}" --lines="${KFLOAT_LINES:-32}" \
+  -o background_opacity=0.94 -o allow_remote_control=no \
+  /bin/bash "$0" --view "$timeout" "${files[@]}" </dev/null >/dev/null 2>&1 &
+disown 2>/dev/null
+exit 0

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# ktemp — use the TEMP shell in this Claude window's right column (created by
+# the addekitty plugin's SessionStart hook).
+#
+#   ktemp <cmd...>                 type the command into TEMP's shell and run it
+#   ktemp --split [--title T] [--var K=V] [--no-hold] <cmd...>
+#                                  run it in a NEW split of the right column;
+#                                  the split stays until a key is pressed, so
+#                                  several (images, GH deploy logs) can be open
+#   ktemp --id                     print the TEMP window id (exit 1 if none)
+#
+# One argument is a raw shell line ('make 2>&1 | tail'); several are quoted.
+# If TEMP's shell is busy, a plain `ktemp` falls back to --split.
+set -euo pipefail
+
+KITTEN="/Applications/kitty.app/Contents/MacOS/kitten"
+command -v "$KITTEN" >/dev/null 2>&1 || KITTEN="$(command -v kitten)"
+OWNER="${KITTY_WINDOW_ID:-}"
+[ -n "$OWNER" ] || { echo "ktemp: not inside a kitty window (KITTY_WINDOW_ID unset)" >&2; exit 1; }
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ "$#" -gt 0 ] || usage
+
+split=""; title=""; extra_vars=(); nohold=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --split) split=1; shift ;;
+    --title) title="${2:-}"; shift 2 ;;
+    --var) extra_vars+=(--var "${2:-}"); shift 2 ;;
+    --no-hold) nohold=1; shift ;;
+    --id|--) break ;;
+    -h|--help) usage ;;
+    *) break ;;
+  esac
+done
+[ "${1:-}" = "--" ] && shift
+
+# The column (TEMP + splits) is shared by every Claude session in the tab.
+LS="$("$KITTEN" @ ls --match-tab "window_id:$OWNER")"
+info="$(/usr/bin/jq -c '[.[].tabs[].windows[] | select(.user_vars.claude_role == "temp")][0] // empty' <<<"$LS")"
+[ -n "$info" ] || { echo "ktemp: no TEMP window in the tab of kitty window $OWNER" >&2; exit 1; }
+id="$(/usr/bin/jq -r .id <<<"$info")"
+if [ "${1:-}" = "--id" ]; then echo "$id"; exit 0; fi
+[ "$#" -gt 0 ] || usage
+if [ "$#" -eq 1 ]; then cmd="$1"; else cmd="$(printf '%q ' "$@")"; fi
+
+if [ -z "$split" ]; then
+  busy="$(/usr/bin/jq -r '[.foreground_processes[].cmdline[0] // "" | split("/")[-1] | ltrimstr("-")
+           | select(test("^(bash|zsh|fish|sh)$") | not)] | join(" ")' <<<"$info")"
+  if [ -z "$busy" ]; then
+    # Ctrl-U clears anything half-typed at the prompt, CR runs the line.
+    printf '\025%s\r' "$cmd" | "$KITTEN" @ send-text --match "id:$id" --stdin
+    echo "ktemp: running in TEMP window $id"
+    exit 0
+  fi
+  echo "ktemp: TEMP is busy ($busy), using a split" >&2
+fi
+
+# New split: halve the tallest window of the column (TEMP or an earlier split).
+target="$(/usr/bin/jq -r '[.[].tabs[].windows[]
+    | select(.user_vars.claude_role == "temp" or .user_vars.claude_role == "view")]
+    | sort_by(-.lines) | .[0].id' <<<"$LS")"
+[ -n "$title" ] || title="▶ ${cmd:0:40}"
+hold='rc=$?; printf "\n\033[2m[exit %s · any key closes]\033[0m" "$rc"; read -rsn1 _'
+[ -n "$nohold" ] && hold=":"
+wid="$("$KITTEN" @ launch --match "window_id:$target" --next-to "id:$target" --type=window \
+        --location=hsplit --keep-focus --cwd "$PWD" --title "$title" --env "PATH=$PATH" \
+        --var claude_role=view --var "claude_role_owner=$OWNER" ${extra_vars[@]+"${extra_vars[@]}"} \
+        /usr/bin/env bash -c "$cmd"$'\n'"$hold")"
+echo "ktemp: running in split window $wid (any key in it closes it)"

@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
-# Claude Code status line — dir · model · context bar · rate-limit bars · git · cost · bg
+# Claude Code status line — account · dir · rate-limits · git · bg
 input=$(cat)
+
+# kitty: save the full payload per kitty window for the STATUS pane
+# (AddeKitty claude/kitty-plugin/scripts/status-view.py). Atomic write.
+if [ -n "${KITTY_WINDOW_ID:-}" ]; then
+  _ksd="${TMPDIR:-/tmp}/claude-kitty-status"; mkdir -p "$_ksd" 2>/dev/null
+  printf '%s\n' "$input" > "$_ksd/$KITTY_WINDOW_ID.json.$$" 2>/dev/null \
+    && mv -f "$_ksd/$KITTY_WINDOW_ID.json.$$" "$_ksd/$KITTY_WINDOW_ID.json" 2>/dev/null
+fi
+
+# Cache rate limits per profile so `ai-limits` can read them from any shell (atomic write).
+_rl=$(printf '%s' "$input" | jq -c '.rate_limits // empty' 2>/dev/null)
+if [ -n "$_rl" ]; then
+  _rlf="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/rate-limits.json"
+  printf '%s\n' "$_rl" > "$_rlf.$$" 2>/dev/null && mv -f "$_rlf.$$" "$_rlf" 2>/dev/null
+fi
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -10,38 +25,26 @@ input=$(cat)
 make_bar() {
   local label="$1"
   local pct_raw="$2"
-  local width=8
+  local width=10
   local pct_int filled bar="" ch color
   pct_int=$(printf "%.0f" "$pct_raw")
-  filled=$(echo "$pct_raw" | awk -v w="$width" '{printf "%d", int($1/(100/w) + 0.5)}')
+  filled=$(echo "$pct_raw" | awk -v w="$width" '{printf "%d", int($1/100 * w + 0.5)}')
   [ "$filled" -gt "$width" ] && filled=$width
+  local f1=(65 71 107 143 179 173 167 131 95 88)
   for i in $(seq 1 $width); do
-    if [ "$i" -lt "$filled" ]; then
-      ch="█"
-    elif [ "$i" -eq "$filled" ] && [ "$filled" -gt 0 ]; then
-      ch="▓"
-    elif [ "$i" -eq $(( filled + 1 )) ] && [ "$filled" -gt 0 ]; then
-      ch="▒"
-    else
-      ch="░"
-    fi
     if [ "$i" -le "$filled" ]; then
-      case "$i" in
-        1|2) color="\033[32m"       ;;
-        3|4) color="\033[92m"       ;;
-        5|6) color="\033[33m"       ;;
-        7)   color="\033[38;5;208m" ;;
-        8)   color="\033[31m"       ;;
-      esac
+      ch="●"
+      color="\033[38;5;${f1[$((i-1))]}m"
     else
-      color="\033[90m"
+      ch="○"
+      color="\033[38;5;238m"
     fi
     bar="${bar}$(printf "${color}${ch}\033[0m")"
   done
   printf "%s %s %d%%" "$label" "$bar" "$pct_int"
 }
 
-# Format time until an ISO-8601 reset timestamp as "Xh Ym", "Xd Yh", or "Xm".
+# Format time until a reset timestamp (Unix epoch seconds) as "Xh Ym", "Xd Yh", or "Xm".
 fmt_reset() {
   local ts="$1"
   [ -z "$ts" ] && return
@@ -75,9 +78,18 @@ esac
 # Working directory (basename)
 cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
 dir=$(basename "$cwd")
+# If cwd is inside a git repo whose root differs from cwd, show repo name instead
+git_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
+if [ -n "$git_root" ] && [ "$git_root" != "$cwd" ]; then
+  dir=$(basename "$git_root")
+fi
 
 # Model display name
 model=$(echo "$input" | jq -r '.model.display_name // empty')
+model_part=""
+if [ -n "$model" ]; then
+  model_part=$(printf "\033[38;5;111m%s\033[0m" "$model")
+fi
 
 # Context window usage (pre-calculated field)
 ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
@@ -146,26 +158,18 @@ if [ -n "$ctx_pct" ]; then
   [ "$ctx_filled" -gt 10 ] && ctx_filled=10
   ctx_bar=""
   for i in $(seq 1 10); do
-    local ch color
-    if [ "$i" -lt "$ctx_filled" ]; then
-      ch="█"
-    elif [ "$i" -eq "$ctx_filled" ] && [ "$ctx_filled" -gt 0 ]; then
-      ch="▓"
-    elif [ "$i" -eq $(( ctx_filled + 1 )) ] && [ "$ctx_filled" -gt 0 ]; then
-      ch="▒"
-    else
-      ch="░"
-    fi
     if [ "$i" -le "$ctx_filled" ]; then
+      ch="●"
       case "$i" in
-        1|2)  color="\033[38;5;153m" ;;  # pale blue
-        3|4)  color="\033[38;5;159m" ;;  # light blue
-        5|6)  color="\033[38;5;195m" ;;  # very light blue
-        7|8)  color="\033[38;5;231m" ;;  # near white-blue
-        9|10) color="\033[97m"       ;;  # bright white
+        1|2)  color="\033[38;5;153m" ;;
+        3|4)  color="\033[38;5;159m" ;;
+        5|6)  color="\033[38;5;195m" ;;
+        7|8)  color="\033[38;5;231m" ;;
+        9|10) color="\033[97m"       ;;
       esac
     else
-      color="\033[90m"
+      ch="○"
+      color="\033[38;5;238m"
     fi
     ctx_bar="${ctx_bar}$(printf "${color}${ch}\033[0m")"
   done
@@ -192,41 +196,42 @@ fi
 
 # ── assemble ──────────────────────────────────────────────────────────────────
 
+append_part() {
+  local part="$1"
+  [ -z "$part" ] && return
+  if [ -n "$line" ]; then
+    line="${line} · ${part}"
+  else
+    line="${part}"
+  fi
+}
+
 line=""
 
 # account (work / personal / default)
-[ -n "$account_part" ] && line="${account_part}"
+append_part "$account_part"
 
-# dir
+# dir — folder icon blue, text gradient blue→white
 if [ -n "$dir" ]; then
-  [ -n "$line" ] && line="${line}  "
-  line="${line}$(printf '\U000f024b') ${dir}"
+  dir_blues=(75 81 117 153 159 195 189 231 255 231)
+  dir_len=${#dir}
+  dir_colored=""
+  for j in $(seq 1 $dir_len); do
+    dir_ch="${dir:$((j-1)):1}"
+    dir_idx=$(( (j - 1) * 9 / (dir_len > 1 ? dir_len - 1 : 1) ))
+    [ "$dir_idx" -gt 9 ] && dir_idx=9
+    dir_colored="${dir_colored}$(printf "[38;5;${dir_blues[$dir_idx]}m${dir_ch}[0m")"
+  done
+  append_part "$(printf "[38;5;75m󰉋[0m") ${dir_colored}"
 fi
 
-# git branch
-if [ -n "$git_part" ]; then
-  [ -n "$line" ] && line="${line}  "
-  line="${line}${git_part}"
-fi
-
-# ctx bar
-if [ -n "$ctx_part" ]; then
-  [ -n "$line" ] && line="${line}  "
-  line="${line}${ctx_part}"
-fi
-
-# rate-limit bars (only appended when data exists)
-if [ -n "$five_part" ]; then
-  line="${line}  ${five_part}"
-fi
-if [ -n "$seven_part" ]; then
-  line="${line}  ${seven_part}"
-fi
+append_part "$five_part"
+append_part "$seven_part"
+append_part "$git_part"
 
 # background process count — only shown when > 0
 if [ -n "$bg_count" ] && [ "$bg_count" -gt 0 ] 2>/dev/null; then
-  [ -n "$line" ] && line="${line}  "
-  line="${line}bg:${bg_count}"
+  append_part "bg:${bg_count}"
 fi
 
 printf "%b" "$line"
@@ -275,13 +280,24 @@ if [ -n "$effort_level" ]; then
     max)    effort_filled=5; effort_color="\033[90m" ;;
     *)      effort_filled=0; effort_color="\033[90m" ;;
   esac
+  vbars=("▁" "▂" "▄" "▅" "▆" "█")
   effort_bar=""
   for i in 1 2 3 4 5; do
-    [ "$i" -le "$effort_filled" ] && effort_bar="${effort_bar}█" || effort_bar="${effort_bar}░"
+    if [ "$i" -le "$effort_filled" ]; then
+      effort_bar="${effort_bar}$(printf "${effort_color}${vbars[$i]}\033[0m")"
+    else
+      effort_bar="${effort_bar}$(printf "\033[38;5;238m▁\033[0m")"
+    fi
   done
-  effort_part=$(printf "${effort_color}effort %s\033[0m" "$effort_bar")
+  effort_part="$(printf "\033[0m")effort ${effort_bar}"
   [ -n "$line2" ] && line2="${line2}  "
   line2="${line2}${effort_part}"
+fi
+
+# ctx bar at end of row 2
+if [ -n "$ctx_part" ]; then
+  [ -n "$line2" ] && line2="${line2}  "
+  line2="${line2}${ctx_part}"
 fi
 
 [ -n "$line2" ] && printf "\n%b" "$line2"

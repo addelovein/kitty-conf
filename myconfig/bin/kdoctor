@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# kdoctor — check that AddeKitty and its Claude Code integration are set up.
+#
+#   kdoctor          run every check, print ok / warn / FAIL per line
+#
+# Checks: kitty version and remote control, jq, python3, PATH, the Claude
+# plugin (default, claude-work and claude-personal profiles), the status-line
+# payload lines, and the current tab's layout. Read-only; changes nothing.
+set -u
+
+KITTEN="/Applications/kitty.app/Contents/MacOS/kitten"
+KITTY="/Applications/kitty.app/Contents/MacOS/kitty"
+fails=0
+ok()   { printf '\033[32mok\033[0m    %s\n' "$*"; }
+warn() { printf '\033[33mwarn\033[0m  %s\n' "$*"; }
+bad()  { printf '\033[31mFAIL\033[0m  %s\n' "$*"; fails=$((fails + 1)); }
+
+# kitty
+if [ -x "$KITTY" ]; then
+  ver="$("$KITTY" --version | awk '{print $2}')"
+  if [ "$(printf '%s\n0.50.0\n' "$ver" | sort -V | head -1)" = "0.50.0" ]; then
+    ok "kitty $ver"
+  else
+    warn "kitty $ver: 0.50+ needed for tab status and docked image viewer (brew upgrade --cask kitty)"
+  fi
+else
+  bad "kitty not found at /Applications/kitty.app (brew install --cask kitty)"
+fi
+
+if [ -n "${KITTY_WINDOW_ID:-}" ]; then
+  if "$KITTEN" @ ls >/dev/null 2>&1; then
+    ok "remote control works (window $KITTY_WINDOW_ID)"
+  else
+    bad "kitten @ ls failed: check allow_remote_control / listen_on in base.conf, then restart kitty"
+  fi
+else
+  warn "not running inside kitty: window and layout checks skipped"
+fi
+
+# tools
+[ -x /usr/bin/jq ] && ok "jq at /usr/bin/jq" \
+  || bad "/usr/bin/jq missing (ships with macOS 15+; the scripts call that path)"
+command -v python3 >/dev/null 2>&1 && ok "python3 $(python3 -c 'import sys; print(sys.version.split()[0])')" \
+  || bad "python3 missing (xcode-select --install or brew install python)"
+case ":$PATH:" in
+  *":$HOME/.config/myconfig/bin:"*) ok "~/.config/myconfig/bin on PATH" ;;
+  *) if [ -n "${CLAUDECODE:-}" ]; then
+       warn "~/.config/myconfig/bin not on PATH in this Claude shell (see env.PATH below)"
+     else
+       bad "~/.config/myconfig/bin not on PATH: run ./setup.sh, then open a new shell"
+     fi ;;
+esac
+
+# Claude Code, per profile that exists
+command -v claude >/dev/null 2>&1 || warn "claude CLI not on PATH"
+for dir in "$HOME/.claude" "$HOME/.claude-work" "$HOME/.claude-personal"; do
+  [ -d "$dir" ] || continue
+  name="${dir##*/}"
+  if /usr/bin/jq -e '.plugins["addekitty@addekitty"]' "$dir/plugins/installed_plugins.json" >/dev/null 2>&1; then
+    ok "$name: plugin addekitty installed"
+  else
+    warn "$name: plugin addekitty not installed (see README, Claude Code setup)"
+  fi
+  envpath="$(/usr/bin/jq -r '.env.PATH // empty' "$dir/settings.json" 2>/dev/null)"
+  case "$envpath" in
+    ""|*"/.config/myconfig/bin"*) ;;
+    *) warn "$name: settings.json env.PATH lacks ~/.config/myconfig/bin: Claude must call kshow/ktemp by full path" ;;
+  esac
+  sl="$(/usr/bin/jq -r '.statusLine.command // empty' "$dir/settings.json" 2>/dev/null)"
+  script="$(printf '%s' "$sl" | grep -oE '[^ ]+\.sh' | head -1)"
+  script="${script/#\~/$HOME}"
+  if [ -z "$sl" ]; then
+    warn "$name: no statusLine set: STATUS will show only state and subagents"
+  elif [ -f "$script" ] && grep -q claude-kitty-status "$script"; then
+    ok "$name: status line saves the payload for STATUS"
+  else
+    warn "$name: status line ($sl) lacks the claude-kitty-status lines (docs/CLAUDE-KITTY.md 1b)"
+  fi
+done
+
+# Layout of this tab
+if [ -n "${KITTY_WINDOW_ID:-}" ]; then
+  layout="$("$KITTEN" @ ls --match-tab "window_id:$KITTY_WINDOW_ID" 2>/dev/null \
+            | /usr/bin/jq -r '[.[].tabs[]][0].layout // empty' 2>/dev/null)"
+  [ "$layout" = "splits" ] && ok "this tab uses the splits layout" \
+    || warn "this tab uses '${layout:-?}': the Claude column and agent strip need splits (Ctrl+Shift+L to cycle)"
+fi
+
+echo
+[ "$fails" -eq 0 ] && echo "kdoctor: no failures" || echo "kdoctor: $fails failure(s)"
+exit $((fails > 0))

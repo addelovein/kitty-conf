@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# kshow — show images in a kitty side window next to the current window.
+#
+#   kshow img.png [more.jpg ...]   show images in a new split
+#   kshow --close                  close all of this window's image/job splits
+#
+# Works when stdout is not a terminal (e.g. from Claude Code's Bash tool).
+# With Claude's right column (see ktemp): each call opens its own split of the
+# column (the tallest window there is halved), kept until a key is pressed in
+# it. Without it: one viewer window, kitty >= 0.50 docks it to the right edge
+# of the calling window (KSHOW_SIZE, default 45%); older kitty: a vertical
+# split; a new call replaces it. Any key closes it.
+set -euo pipefail
+
+KITTEN="/Applications/kitty.app/Contents/MacOS/kitten"
+command -v "$KITTEN" >/dev/null 2>&1 || KITTEN="$(command -v kitten)"
+OWNER="${KITTY_WINDOW_ID:-}"
+SIZE="${KSHOW_SIZE:-45%}"
+[ -n "$OWNER" ] || { echo "kshow: not inside a kitty window (KITTY_WINDOW_ID unset)" >&2; exit 1; }
+
+close_viewer() {
+  "$KITTEN" @ close-window --match "var:kshow_owner=$OWNER" --ignore-no-match >/dev/null 2>&1 || true
+}
+# --close: also every split of the right column (images, ktemp --split jobs).
+close_all() {
+  close_viewer
+  local id
+  for id in $("$KITTEN" @ ls --match-tab "window_id:$OWNER" 2>/dev/null \
+      | /usr/bin/jq -r '.[].tabs[].windows[] | select(.user_vars.claude_role == "view") | .id'); do
+    "$KITTEN" @ close-window --match "id:$id" --ignore-no-match >/dev/null 2>&1 || true
+  done
+}
+
+if [ "${1:-}" = "--close" ]; then close_all; exit 0; fi
+[ "$#" -gt 0 ] || { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+
+files=()
+for f in "$@"; do
+  [ -f "$f" ] || { echo "kshow: no such file: $f" >&2; exit 1; }
+  files+=("$(cd "$(dirname "$f")" && pwd)/$(basename "$f")")
+done
+
+# Viewer program: draw each image with its name, then wait for a key.
+read -r -d '' VIEWER <<'SH' || true
+k="$1"; shift
+for f in "$@"; do
+  printf '\033[1m%s\033[0m\n' "${f##*/}"
+  "$k" icat --align left "$f" || echo "(icat failed for $f)"
+  echo
+done
+printf '\033[2m[any key closes]\033[0m'
+read -rsn1 _
+SH
+
+# Preferred: the TEMP window of this Claude window's right column (ktemp).
+KTEMP="$(dirname "$0")/ktemp"
+# Each call opens its own split of the column, kept until a key is pressed.
+if [ -x "$KTEMP" ] && "$KTEMP" --id >/dev/null 2>&1; then
+  vtitle="🖼 ${files[0]##*/}"; [ "${#files[@]}" -gt 1 ] && vtitle="$vtitle +$(( ${#files[@]} - 1 ))"
+  line="for f in $(printf '%q ' "${files[@]}"); do printf '\033[1m%s\033[0m\n' \"\${f##*/}\"; $(printf '%q' "$KITTEN") icat --align left \"\$f\"; echo; done"
+  if out="$("$KTEMP" --split --title "$vtitle" "$line" 2>&1)"; then
+    echo "kshow: ${out#ktemp: }"
+    exit 0
+  fi
+fi
+
+close_viewer
+title="🖼 ${files[0]##*/}"; [ "${#files[@]}" -gt 1 ] && title="$title +$(( ${#files[@]} - 1 ))"
+common=(--keep-focus --title "$title" --var "kshow_owner=$OWNER")
+cmd=(bash -c "$VIEWER" kshow "$KITTEN" "${files[@]}")
+
+# True if window $1 sits in the same tab as window $2. Guard: if the dock launch
+# put the window anywhere else, close it and fall back to a plain split.
+same_tab() {
+  "$KITTEN" @ ls --match-tab "window_id:$2" 2>/dev/null \
+    | /usr/bin/jq -e --argjson w "$1" 'any(.[].tabs[].windows[]; .id == $w)' >/dev/null 2>&1
+}
+
+wid="$("$KITTEN" @ launch --match "window_id:$OWNER" --next-to "id:$OWNER" --type=window-dock \
+         --dock-edge=right --dock-size="$SIZE" "${common[@]}" "${cmd[@]}" 2>/dev/null)" || wid=""
+if [[ "$wid" =~ ^[0-9]+$ ]] && ! same_tab "$wid" "$OWNER"; then
+  "$KITTEN" @ close-window --match "id:$wid" --ignore-no-match >/dev/null 2>&1 || true
+  wid=""
+fi
+if ! [[ "$wid" =~ ^[0-9]+$ ]]; then
+  wid="$("$KITTEN" @ launch --match "window_id:$OWNER" --next-to "id:$OWNER" --type=window \
+           --location=vsplit --bias="${SIZE%\%}" "${common[@]}" "${cmd[@]}")"
+fi
+echo "kshow: showing ${#files[@]} image(s) in kitty window $wid"
