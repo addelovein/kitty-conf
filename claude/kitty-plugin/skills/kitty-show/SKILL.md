@@ -7,8 +7,10 @@ description: Show an image, screenshot, chart or rendered diagram to the user in
 
 Images you Read, image paths you mention in a reply (if the file exists),
 and https image URLs in a reply (ending in .png/.jpg/…, no query string) are
-shown to the user automatically by a hook, in a floating panel. Write the
-full path or URL of any image you produce or refer to; call `kshow` yourself only to show
+shown to the user automatically by a hook, in the right column. Write the
+full path or URL of any image you produce or refer to, and write a local
+image as a `file://` URL (`file:///abs/path/plot.png`): kitty only makes
+URLs clickable, and clicking that one opens the image for the user; call `kshow` yourself only to show
 something again or several images side by side mid-turn.
 
 Your Bash tool's output is captured, not a terminal, so `kitten icat` run

@@ -76,7 +76,8 @@ shared by every Claude session in that tab:
   and `gh run watch` (below) are skipped. Claude's commands are not changed.
   `KITTY_WAIT_SPLIT=0` turns it off.
 - **Every image Claude looks at or mentions is shown** (`scripts/image-show.sh`)
-  in a floating panel in the middle of the screen (`kfloat`, below).
+  in a split of the right column (`kshow`). Clicking an image link opens the
+  floating panel instead (`kfloat`, below).
   PostToolUse on Read: an image file Claude opens is shown right away. Stop:
   image paths in Claude's reply that exist on disk (absolute, `~/`, relative
   to the session dir, markdown links) and https image URLs are shown together
@@ -84,8 +85,8 @@ shared by every Claude session in that tab:
   `?query` or `#fragment` and are not localhost or an IP address, so a reply
   cannot be used to send data out through a URL. Each file (path + mtime) or
   URL once per session, at most `KITTY_IMAGE_MAX` (6) per turn.
-  `KITTY_IMAGE_SHOW=0` turns it off, `KITTY_IMAGE_FLOAT=0` uses a column
-  split (`kshow`, local files only) instead of the panel.
+  `KITTY_IMAGE_SHOW=0` turns it off, `KITTY_IMAGE_FLOAT=1` uses the floating
+  panel instead of the column.
 - **GitHub runs open by themselves** (`scripts/gh-watch.sh`, Bash Pre/PostToolUse
   hooks). When Claude runs `gh workflow run …` (the run URL in its output, or
   the workflow's newest run) or `gh run watch <id>`, a split titled
@@ -152,9 +153,9 @@ Tunables (environment of the Claude process):
 | `KITTY_WAIT_LINGER` | `10` | seconds a finished split stays; `0` keeps it until a key |
 | `KITTY_IMAGE_SHOW` | `1` | `0` stops showing images Claude opens or mentions |
 | `KITTY_IMAGE_MAX` | `6` | images shown per turn at most |
-| `KITTY_IMAGE_FLOAT` | `1` | `0` shows images in a column split instead of the floating panel |
+| `KITTY_IMAGE_FLOAT` | `0` | `1` shows Claude's images in the floating panel instead of the column |
 | `KITTY_IMAGE_URLS` | `1` | `0` stops fetching image URLs from Claude's replies |
-| `KFLOAT_TIMEOUT` | `12` | seconds per image in the floating panel; `0` waits for a key |
+| `KFLOAT_TIMEOUT` | `0` clicked / `12` otherwise | seconds per image in the floating panel; `0` stays until closed |
 | `KFLOAT_COLS` / `KFLOAT_LINES` | `100` / `32` | floating panel size in cells |
 | `KITTY_GH_WATCH` | `1` | `0` stops GitHub runs opening a watch split |
 | `KITTY_AGENT_DEBUG` | `0` | `1` logs hook payloads to `$TMPDIR/claude-kitty-agents/debug.log` |
@@ -185,11 +186,13 @@ kfloat shot.png https://example.org/chart.png   # files and http(s) image URLs
 kfloat --focus pic.png    # take keyboard focus (what a link click does)
 ```
 
-A `kitten panel` centered over everything (`--layer=overlay`). It shows one
-image at a time: any key shows the next one, `q`/Esc closes, and each image
-moves on by itself after `KFLOAT_TIMEOUT` seconds. Started from the hook it
-does not take focus, so typing to Claude is not interrupted; click it to
-focus it. URLs are downloaded with curl (https-only redirects, 10 MB, 15 s)
+A `kitten panel` centered over everything (`--layer=overlay`), titled
+"Image preview". It shows one image at a time. The red **✕ Close** button at
+the top right, `q` or Esc close it; a click anywhere else or any other key
+shows the next image (or closes after the last). Opened by a click it stays
+until closed; opened without `--focus` it moves on after 12 s and does not
+take focus, so typing to Claude is not interrupted. `kfloat --fetch <url>`
+only downloads and prints the local path (the hook uses it for `kshow`). URLs are downloaded with curl (https-only redirects, 10 MB, 15 s)
 to `~/Library/Caches/kfloat` (kept 7 days) and shown only if `file` says the
 content is an image.
 
@@ -197,6 +200,11 @@ content is an image.
 or a hyperlinked image file anywhere in kitty open it in `kfloat`; other
 links still go to the browser. kitty reads the file on the next click, no
 restart needed.
+
+Plain paths are not links in kitty, so Claude writes local images as
+`file:///abs/path.png` (the `kitty-show` skill says so). For any path on
+screen, press Ctrl+Shift+P then I and pick it by its hint letter
+(`base.conf`).
 
 ## 4. Notifications
 

@@ -4,12 +4,15 @@
 #   kfloat [options] <file|url>...
 #
 #   --timeout S   seconds per image before it moves on / closes (default
-#                 KFLOAT_TIMEOUT or 12; 0 = wait for a key)
+#                 KFLOAT_TIMEOUT, else 0 with --focus and 12 without;
+#                 0 = stay until closed)
 #   --focus       take keyboard focus (used when you click a link)
-#   --nofocus     never take focus; click the panel to focus it (default)
+#   --nofocus     don't take focus; click the panel to focus it (default)
+#   --fetch       only download/resolve: print the local file paths, no panel
 #
-# Any key shows the next image; after the last one the panel closes. q or Esc
-# closes at once. Size: KFLOAT_COLS (default 100) x KFLOAT_LINES (default 32).
+# The "✕ Close" button (top right), q or Esc close the panel. A click
+# elsewhere or any other key shows the next image, or closes after the last.
+# Size: KFLOAT_COLS (default 100) x KFLOAT_LINES (default 32).
 #
 # http(s) URLs are downloaded first (https-only redirects, max 10 MB, 15 s) to
 # ~/Library/Caches/kfloat and shown only if the content really is an image.
@@ -22,27 +25,67 @@ KITTEN="/Applications/kitty.app/Contents/MacOS/kitten"
 if [ "${1:-}" = "--view" ]; then
   shift; timeout="$1"; shift
   n=$#; i=0
-  printf '\033]0;Image preview\007\033[?25l'
+  CLOSE=" ✕ Close "
+  # Title, hidden cursor, mouse clicks reported as SGR sequences.
+  printf '\033]0;Image preview\007\033[?25l\033[?1000h\033[?1006h'
+  trap 'printf "\033[?1000l\033[?1006l\033[?25h"' EXIT
+
+  # One input event → "close", "next" or "" (ignore) in $ev. Status 1 = timeout.
+  read_event() {
+    local c rest b
+    ev=""
+    if [ "$1" -gt 0 ]; then read -rsn1 -t "$1" c || return 1; else read -rsn1 c || return 1; fi
+    case "$c" in
+      q|Q) ev=close ;;
+      $'\e')
+        read -rsn1 -t 0.05 rest || { ev=close; return 0; }          # bare Esc
+        [ "$rest" = "[" ] && read -rsn1 -t 0.05 c || c=""
+        if [ "$c" = "<" ]; then
+          rest=""
+          while read -rsn1 -t 0.05 c; do
+            [ "$c" = "M" ] || [ "$c" = "m" ] && break
+            rest="$rest$c"
+          done
+          [ "$c" = "M" ] || return 0                                 # release: ignore
+          IFS=';' read -r b mx my <<<"$rest"
+          [ "$b" = "0" ] || return 0                                 # left button only
+          if [ "$my" -eq 1 ] && [ "$mx" -ge "$closecol" ]; then ev=close; else ev=next; fi
+        else                                                         # other key sequence: skip it
+          while [ -n "$c" ] && [[ "$c" != [@-~] ]] && read -rsn1 -t 0.05 c; do :; done
+        fi ;;
+      *) ev=next ;;
+    esac
+    return 0
+  }
+
   for f in "$@"; do
     i=$((i + 1))
     cols=$(tput cols 2>/dev/null || echo 100); rows=$(tput lines 2>/dev/null || echo 32)
+    closecol=$((cols - ${#CLOSE} + 1))
     printf '\033[2J\033[3J\033[H'
     "$KITTEN" icat --stdin=no --clear >/dev/null 2>&1
-    "$KITTEN" icat --stdin=no --place "${cols}x$((rows - 1))@0x0" --scale-up "$f" 2>/dev/null \
-      || printf '(cannot show %s)' "$f"
+    "$KITTEN" icat --stdin=no --place "${cols}x$((rows - 2))@0x1" --scale-up "$f" 2>/dev/null \
+      || printf '\033[2;1H(cannot show %s)' "$f"
     label="${f##*/}"; [ -n "${KFLOAT_LABELS:-}" ] && label="$(sed -n "${i}p" <<<"$KFLOAT_LABELS")"
-    more=""; [ "$i" -lt "$n" ] && more=" · key: next"
-    printf '\033[%d;1H\033[2m%s (%d/%d)%s · q: close\033[0m' "$rows" "${label:0:$((cols - 30))}" "$i" "$n" "$more"
-    if [ "$timeout" -gt 0 ]; then read -rsn1 -t "$timeout" key; else read -rsn1 key; fi
-    case "${key:-}" in q|Q|$'\e') break ;; esac
-    key=""
+    printf '\033[1;1H\033[1mImage preview\033[0m \033[2m(%d/%d)\033[0m' "$i" "$n"
+    printf '\033[1;%dH\033[1;37;41m%s\033[0m' "$closecol" "$CLOSE"
+    more="click or any key: next · "; [ "$i" -lt "$n" ] || more="click or any key: close · "
+    printf '\033[%d;1H\033[2m%s%sq/Esc: close\033[0m' "$rows" "${label:0:$((cols - 45))}  " "$more"
+    end=$(( SECONDS + timeout ))
+    while :; do
+      left=0; [ "$timeout" -gt 0 ] && { left=$(( end - SECONDS )); [ "$left" -gt 0 ] || break; }
+      read_event "$left" || break
+      [ -n "$ev" ] && break
+    done
+    [ "${ev:-}" = "close" ] && break
   done
   exit 0
 fi
 
 # ---- launcher mode ---------------------------------------------------------
-timeout="${KFLOAT_TIMEOUT:-12}"
+timeout=""
 focus="on-demand"
+fetch_only=0
 files=()
 labels=""
 while [ $# -gt 0 ]; do
@@ -50,7 +93,8 @@ while [ $# -gt 0 ]; do
     --timeout) timeout="$2"; shift 2; continue ;;
     --focus) focus="exclusive"; shift; continue ;;
     --nofocus) focus="on-demand"; shift; continue ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --fetch) fetch_only=1; shift; continue ;;
+    -h|--help) sed -n '2,/^set -u/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
   esac
   src="$1"; shift
   case "$src" in
@@ -83,6 +127,9 @@ while [ $# -gt 0 ]; do
   labels="$labels${labels:+$'\n'}${label}"
 done
 [ "${#files[@]}" -gt 0 ] || exit 1
+if [ "$fetch_only" = 1 ]; then printf '%s\n' "${files[@]}"; exit 0; fi
+# Clicked (focused) panels stay until closed; others move on by themselves.
+[ -n "$timeout" ] || { [ "$focus" = exclusive ] && timeout="${KFLOAT_TIMEOUT:-0}" || timeout="${KFLOAT_TIMEOUT:-12}"; }
 
 # Not --detach: in kitty 0.50 it drops --lines/--columns ("Unknown flag").
 KFLOAT_LABELS="$labels" nohup "$KITTEN" panel \

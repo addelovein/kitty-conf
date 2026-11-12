@@ -100,13 +100,13 @@ Repeat steps 1–3 for every Claude profile you use. For a profile other than
 
 Any command Claude waits on for more than 3 s, every GitHub run it starts, and
 every image it opens or mentions in a reply (paths and https image URLs) are
-shown: commands and runs in their own split below TEMP, images in a floating
-panel in the middle of the screen (`kfloat`). Cmd+clicking an image URL
-anywhere in kitty opens the same panel (`kitty/open-actions.conf`).
+shown in their own split below TEMP. Clicking an image link (a URL or a
+`file://` path) anywhere in kitty opens it in a floating panel with a Close
+button instead (`kfloat`, `kitty/open-actions.conf`).
 
 Turn the column off with `KITTY_CLAUDE_LAYOUT=0`, the subagent windows with
 `KITTY_AGENT_WINDOWS=0`, the live command splits with `KITTY_WAIT_SPLIT=0`, the images with
-`KITTY_IMAGE_SHOW=0` (or `KITTY_IMAGE_FLOAT=0` for a column split instead of the panel). All tunables: [`docs/CLAUDE-KITTY.md`](docs/CLAUDE-KITTY.md).
+`KITTY_IMAGE_SHOW=0` (or `KITTY_IMAGE_FLOAT=1` for the floating panel instead of the column). All tunables: [`docs/CLAUDE-KITTY.md`](docs/CLAUDE-KITTY.md).
 
 ## Update
 

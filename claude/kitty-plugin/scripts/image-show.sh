@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # image-show.sh — Claude Code hook: show every image Claude looks at or
-# refers to, in a floating panel (kfloat) or, with KITTY_IMAGE_FLOAT=0, in a
-# split of the tab's right column (kshow).
+# refers to, in a split of the tab's right column (kshow), or, with
+# KITTY_IMAGE_FLOAT=1, in a floating panel (kfloat). Clicking an image link
+# opens the floating panel (kitty/open-actions.conf), not this hook.
 #
 #   read  PostToolUse on Read: Claude opened an image file → show it now
 #   stop  Stop: images in Claude's reply text this turn, shown together:
@@ -23,7 +24,7 @@ exec >/dev/null 2>>"${TMPDIR:-/tmp}/claude-kitty-agents.err"
 JQ=/usr/bin/jq
 KSHOW="$HOME/.config/myconfig/bin/kshow"
 KFLOAT="$HOME/.config/myconfig/bin/kfloat"
-if [ "${KITTY_IMAGE_FLOAT:-1}" != "0" ] && [ -x "$KFLOAT" ]; then
+if [ "${KITTY_IMAGE_FLOAT:-0}" = "1" ] && [ -x "$KFLOAT" ]; then
   VIEW=("$KFLOAT" --nofocus)
 else
   VIEW=("$KSHOW")
@@ -63,8 +64,8 @@ case "$MODE" in
     while IFS= read -r p; do
       [ -n "$p" ] && candidates+=("$p")
     done < <(grep -oiE "(~|\.{0,2}/)?[A-Za-z0-9_@%+=:,.~/-]*[A-Za-z0-9_-]\.($EXT)\b" <<<"$text" \
-               | grep -vE '^//|://' | awk '!seen[$0]++')
-    if [ "${KITTY_IMAGE_URLS:-1}" != "0" ] && [ "${VIEW[0]}" = "$KFLOAT" ]; then
+               | sed -E 's#^file://##' | grep -vE '^//|://' | awk '!seen[$0]++')
+    if [ "${KITTY_IMAGE_URLS:-1}" != "0" ] && [ -x "$KFLOAT" ]; then
       # Whole https tokens; one with ?query or #fragment never ends in .png.
       while IFS= read -r u; do
         u="${u%%[].,;:!\']}"
@@ -86,7 +87,12 @@ for p in "${candidates[@]}"; do
   case "$p" in
     https://*)
       key="url-$(printf '%s' "$p" | md5 -q)"
-      mkdir "$STATE/$key" 2>/dev/null && show+=("$p")
+      mkdir "$STATE/$key" 2>/dev/null || continue
+      if [ "${VIEW[0]}" = "$KFLOAT" ]; then
+        show+=("$p")
+      else                                   # kshow needs a file: download it
+        p="$("$KFLOAT" --fetch "$p" 2>/dev/null)" && [ -f "$p" ] && show+=("$p")
+      fi
       continue ;;
     "~/"*) p="$HOME/${p#\~/}" ;;
     /*) ;;
